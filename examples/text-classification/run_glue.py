@@ -136,14 +136,17 @@ def main():
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
+        #GlueDataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
     )
     eval_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+        #GlueDataset(data_args, tokenizer=tokenizer, mode="dev")
         if training_args.do_eval
         else None
     )
     test_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
+        #GlueDataset(data_args, tokenizer=tokenizer, mode="test")
         if training_args.do_predict
         else None
     )
@@ -189,11 +192,33 @@ def main():
             mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
             eval_datasets.append(
                 GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+                #GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev")
             )
 
         for eval_dataset in eval_datasets:
-            trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+            # trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
+            # eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+
+            eval_dataloader = trainer.get_eval_dataloader(eval_dataset)
+            output = trainer._prediction_loop(eval_dataloader, description="Evaluation")
+            eval_result = output.metrics
+
+            total_elements = len(output.label_ids)
+            logger.info("  Total of elements: %s", total_elements)
+            counter_mismatched = 0
+
+            my_classifications = np.argmax(output.predictions, axis=1)
+
+            output_mismatched_file = os.path.join(
+                training_args.output_dir, f"mismatched_results_{eval_dataset.args.task_name}.txt"
+            )
+            with open(output_mismatched_file, "w") as writer:
+                for idx in range(total_elements):
+                    if (output[1][idx].item() != my_classifications[idx].item()):
+                        counter_mismatched = counter_mismatched + 1
+                        writer.write("%s\n" % idx)
+
+            logger.info("  Number of misclassified elements: %s", counter_mismatched)
 
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
@@ -214,6 +239,7 @@ def main():
             mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
             test_datasets.append(
                 GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
+                #GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test")
             )
 
         for test_dataset in test_datasets:
