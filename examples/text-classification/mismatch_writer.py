@@ -25,6 +25,9 @@ def main():
         file_suffix = 'mnli-mm'
         input_file = os.path.join(parsed[0].data_dir, 'dev_mismatched.tsv')
         output_file_suffix = '-mm.tsv'
+    elif (task_name == 'MRPC'):
+        file_suffix = 'mrpc'
+        input_file = os.path.join(parsed[0].data_dir, 'dev.tsv')
     else:
         raise RuntimeError('Unknown task name')           
 
