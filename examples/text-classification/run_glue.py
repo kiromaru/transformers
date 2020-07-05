@@ -136,17 +136,14 @@ def main():
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
-        #GlueDataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
     )
     eval_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
-        #GlueDataset(data_args, tokenizer=tokenizer, mode="dev")
         if training_args.do_eval
         else None
     )
     test_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
-        #GlueDataset(data_args, tokenizer=tokenizer, mode="test")
         if training_args.do_predict
         else None
     )
@@ -192,7 +189,6 @@ def main():
             mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
             eval_datasets.append(
                 GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
-                #GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev")
             )
 
         for eval_dataset in eval_datasets:
@@ -239,7 +235,6 @@ def main():
             mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
             test_datasets.append(
                 GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
-                #GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test")
             )
 
         for test_dataset in test_datasets:
