@@ -24,7 +24,17 @@ def main():
     elif (task_name == 'MNLI-MM'):
         file_suffix = 'mnli-mm'
         input_file = os.path.join(parsed[0].data_dir, 'dev_mismatched.tsv')
-        output_file_suffix = '-mm.tsv'
+        output_file_suffix = '-mm'
+    elif (task_name == 'MNLI-HANS'):
+        file_suffix = 'mnli-hans'
+        input_file = os.path.join(parsed[0].data_dir, 'dev_matched.tsv')
+    elif (task_name == 'MNLI-HANS-MM'):
+        file_suffix = 'mnli-hans-mm'
+        input_file = os.path.join(parsed[0].data_dir, 'dev_mismatched.tsv')
+        output_file_suffix = '-mm'
+    elif (task_name == 'QQP'):
+        file_suffix = 'qqp'
+        input_file = os.path.join(parsed[0].data_dir, 'dev.tsv')
     elif (task_name == 'MRPC'):
         file_suffix = 'mrpc'
         input_file = os.path.join(parsed[0].data_dir, 'dev.tsv')

@@ -74,6 +74,10 @@ if _has_sklearn:
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == "hans":
             return {"acc": simple_accuracy(preds, labels)}
+        elif task_name == "mnli-hans":
+            return {"mnli-hans/acc": simple_accuracy(preds, labels)}
+        elif task_name == "mnli-hans-mm":
+            return {"mnli-hans-mm/acc": simple_accuracy(preds, labels)}
         else:
             raise KeyError(task_name)
 
