@@ -268,7 +268,7 @@ class HansProcessor(DataProcessor):
             text_a = line[5]
             text_b = line[6]
             pairID = line[7][2:] if line[7].startswith("ex") else line[7]
-            label = line[-1]
+            label = line[0]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label, pairID=pairID))
         return examples
 

@@ -210,14 +210,20 @@ def main():
         preds = output.predictions
         preds = np.argmax(preds, axis=1)
 
+        mismatch_eval_file = os.path.join(training_args.output_dir, "hans_mismatched.txt")
+
         pair_ids = [ex.pairID for ex in eval_dataset]
         output_eval_file = os.path.join(training_args.output_dir, "hans_predictions.txt")
         label_list = eval_dataset.get_labels()
         if trainer.is_world_master():
             with open(output_eval_file, "w") as writer:
-                writer.write("pairID,gold_label\n")
-                for pid, pred in zip(pair_ids, preds):
-                    writer.write("ex" + str(pid) + "," + label_list[int(pred)] + "\n")
+                with open(mismatch_eval_file, "w") as mismatch_writer:
+                    writer.write("pairID,gold_label\n")
+                    for pid, pred in zip(pair_ids, preds):
+                        writer.write("ex" + str(pid) + "," + label_list[int(pred)] + "\n")
+
+                        if int(pred) != int(eval_dataset[pid].label):
+                            mismatch_writer.write(str(pid) + "\n")
 
         trainer._log(output.metrics)
 
