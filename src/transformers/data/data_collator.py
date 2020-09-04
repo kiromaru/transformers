@@ -56,7 +56,14 @@ def default_data_collator(features: List[InputDataClass]) -> Dict[str, torch.Ten
     # Handling of all other possible keys.
     # Again, we will use the first element to figure out which key/values are not None for this model.
     for k, v in first.items():
-        if k not in ("label", "label_ids") and v is not None and not isinstance(v, str):
+        if k == "pre_loss":
+            batched_pre_loss = float(0)
+            for f in features:
+                pre_loss = f['pre_loss']
+                if pre_loss is not None:
+                    batched_pre_loss += pre_loss
+            batch[k] = batched_pre_loss
+        if k not in ("label", "label_ids", "pre_loss") and v is not None and not isinstance(v, str):
             if isinstance(v, torch.Tensor):
                 batch[k] = torch.stack([f[k] for f in features])
             else:

@@ -139,7 +139,7 @@ def _glue_convert_examples_to_features(
     for i in range(len(examples)):
         inputs = {k: batch_encoding[k][i] for k in batch_encoding}
 
-        feature = InputFeatures(**inputs, label=labels[i])
+        feature = InputFeatures(**inputs, label=labels[i], pre_loss=examples[i].pre_loss)
         features.append(feature)
 
     for i, example in enumerate(examples[:5]):
@@ -212,6 +212,9 @@ class MnliProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir):
         """See base class."""
+        preprocessed = os.path.join(data_dir, "train_preprocessed.tsv")
+        if os.path.exists(preprocessed):
+            return self._create_examples(self._read_tsv(preprocessed), "train")
         return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
 
     def get_dev_examples(self, data_dir):
@@ -235,8 +238,17 @@ class MnliProcessor(DataProcessor):
             guid = "%s-%s" % (set_type, line[0])
             text_a = line[8]
             text_b = line[9]
-            label = None if set_type.startswith("test") else line[-1]
-            examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+            label = None
+            line_loss = None
+            if set_type.startswith("train"):
+                if len(line) >= 13:
+                    label = line[-2]
+                    line_loss = float(line[-1])
+                else:
+                    label = line[-1]
+            if set_type.startswith("dev"):
+                label = line[-1]
+            examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label, pre_loss=line_loss))
         return examples
 
 
