@@ -499,6 +499,8 @@ class Trainer:
                     steps_trained_in_current_epoch -= 1
                     continue
 
+                # Get the word-prediction loss for the batch and pass it to _training_step. This method is the
+                # one that calls loss.backward()
                 pre_loss = inputs['pre_loss']
                 avg_pre_loss = pre_loss / (len(inputs['input_ids']))
                 inputs.pop('pre_loss')
@@ -628,7 +630,7 @@ class Trainer:
 
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
-        loss += pre_loss
+        loss += pre_loss   # Add word prediction loss
 
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
