@@ -500,9 +500,10 @@ class Trainer:
                     continue
 
                 pre_loss = inputs['pre_loss']
+                avg_pre_loss = pre_loss / (len(inputs['input_ids']))
                 inputs.pop('pre_loss')
 
-                tr_loss += self._training_step(model, inputs, optimizer, pre_loss)
+                tr_loss += self._training_step(model, inputs, optimizer, avg_pre_loss)
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
@@ -827,6 +828,7 @@ class Trainer:
                 inputs["mems"] = past
 
             with torch.no_grad():
+                inputs.pop('pre_loss')
                 outputs = model(**inputs)
                 if has_labels:
                     step_eval_loss, logits = outputs[:2]

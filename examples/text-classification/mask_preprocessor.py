@@ -9,18 +9,17 @@ from transformers import AutoTokenizer, AutoModelWithLMHead
 
 parser = argparse.ArgumentParser(description = 'Dataset preprocessor using masked words')
 parser.add_argument('--percent', type=float, required=False, help='Percentage of words that will be masked', default=0.15)
-parser.add_argument('--task', type=str, required=True, help='Task name')
+parser.add_argument('--task_name', type=str, required=True, help='Task name')
 parser.add_argument('--data_dir', type=str, required=True, help='Data directory')
 #parser.add_argument('--output_dir', type=str, required=True, help='Output directory')
 parser.add_argument('--cache_dir', type=str, required=False, help='Cache directory')
 parser.add_argument('--model_name_or_path', type=str, required=True, help='Model name or path')
 parser.add_argument('--verbosity', type=str, required=False, choices=[ 'normal', 'verbose' ], default='normal', help='Defines verbosity')
 
-parsed = parser.parse_known_args(sys.argv)
-parsed_args = parsed[0]
+verbosity_level = 'normal'
 
 def is_verbose():
-    if parsed_args.verbosity == 'verbose':
+    if verbosity_level == 'verbose':
         return True
     return False
 
@@ -93,14 +92,26 @@ def reconstruct_sentence(tokens: list, predicted_indexes: list, special_tokens: 
 def main():
     script_start = time.time()
 
-    input_filename = os.path.join(parsed_args.data_dir, get_input_filename(parsed_args.task))
-    output_filename = os.path.join(parsed_args.data_dir, get_output_filename(parsed_args.task))
-    input_columns = get_columns_to_process(parsed_args.task)
+    parsed = parser.parse_known_args(sys.argv)
+    parsed_args = parsed[0]
+    
+    verbosity_level = parsed_args.verbosity
+
+    if torch.cuda.is_available():
+        dev = "cuda:0"
+    else:
+        dev = "cpu"
+
+    input_filename = os.path.join(parsed_args.data_dir, get_input_filename(parsed_args.task_name))
+    output_filename = os.path.join(parsed_args.data_dir, get_output_filename(parsed_args.task_name))
+    input_columns = get_columns_to_process(parsed_args.task_name)
 
     print (f'Loading model: {parsed_args.model_name_or_path}')
     tokenizer = AutoTokenizer.from_pretrained(parsed_args.model_name_or_path, cache_dir=parsed_args.cache_dir)
     model = AutoModelWithLMHead.from_pretrained(parsed_args.model_name_or_path, cache_dir=parsed_args.cache_dir)
     special_tokens = [ tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.mask_token_id ]
+
+    model.to(dev)
 
     print (f'Start processing file: {input_filename}')
 
@@ -160,9 +171,10 @@ def main():
                 for idx in range(len(inputs)):
                     input = inputs[idx]
                     input_copy = inputs_copy[idx]
+                    input_copy = input_copy.to(dev)
                     mask_token_index = torch.where(input == tokenizer.mask_token_id)[1]
                     if len(mask_token_index) > 0:
-                        model_result = model(input, labels=input_copy)
+                        model_result = model(input.to(dev), labels=input_copy)
                         sentence_loss = model_result[0].item()
                         line_loss += sentence_loss
                         total_loss += sentence_loss

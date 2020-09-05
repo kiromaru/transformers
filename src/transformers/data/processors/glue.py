@@ -121,7 +121,11 @@ def _glue_convert_examples_to_features(
         if example.label is None:
             return None
         if output_mode == "classification":
-            return label_map[example.label]
+            try:
+                return label_map[example.label]
+            except KeyError:
+                logger.warn("KeyError in %s for task %s" % (example.guid, task))
+                return label_map[label_list[0]]
         elif output_mode == "regression":
             return float(example.label)
         raise KeyError(output_mode)
