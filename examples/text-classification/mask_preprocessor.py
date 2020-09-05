@@ -18,6 +18,8 @@ parser.add_argument('--verbosity', type=str, required=False, choices=[ 'normal',
 
 verbosity_level = 'normal'
 
+csv.field_size_limit(sys.maxsize)
+
 def is_verbose():
     if verbosity_level == 'verbose':
         return True
@@ -94,7 +96,7 @@ def main():
 
     parsed = parser.parse_known_args(sys.argv)
     parsed_args = parsed[0]
-    
+
     verbosity_level = parsed_args.verbosity
 
     if torch.cuda.is_available():
@@ -121,7 +123,7 @@ def main():
 
     with open(input_filename, 'r', encoding='utf8') as reader:
         with open(output_filename, 'w', encoding='utf8', newline='') as writer:
-            tsv_reader = csv.reader(reader, delimiter="\t")
+            tsv_reader = csv.reader(reader, delimiter="\t", quoting=csv.QUOTE_NONE)
             tsv_writer = csv.writer(writer, delimiter="\t")
 
             for row in tsv_reader:
