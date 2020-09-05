@@ -1,8 +1,8 @@
 import sys
 import argparse
 import os
-import mask_preprocessor as mp
-import run_glue as rg
+import mask_preprocessor
+import run_glue
 
 parser = argparse.ArgumentParser(description = 'Process to mask input file and finetune with hugging face')
 parser.add_argument('--num_train_epochs', type=int, required=True, help='Number of training epochs to execute')
@@ -32,7 +32,8 @@ def main():
     for epoch in range(num_epochs):
         iter_output = os.path.join(output_dir, 'iter' + str(epoch))
 
-        # Remove any cache for training data
+        # Remove any cache for training data, as we need to refresh it with the new
+        # predicted words and calculated data
         files = os.listdir(parsed_args.cache_dir)
         for f in files:
             if f.startswith('cached_train'):
@@ -41,11 +42,11 @@ def main():
 
         replace_parameter_value('--output_dir', iter_output)
 
-        # First step: Mask words, predict and calculate individual loss
-        mp.main()
+        # First step: Mask words, predict and calculate loss
+        mask_preprocessor.main()
 
         # Second step: Fine tune with hugging face
-        rg.main()
+        run_glue.main()
 
         # Model for next iteration is the result of this epoch
         replace_parameter_value('--model_name_or_path', iter_output)
