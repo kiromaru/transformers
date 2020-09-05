@@ -18,7 +18,7 @@ parser.add_argument('--verbosity', type=str, required=False, choices=[ 'normal',
 
 verbosity_level = 'normal'
 
-csv.field_size_limit(sys.maxsize)
+#csv.field_size_limit(sys.maxsize)
 
 def is_verbose():
     if verbosity_level == 'verbose':
