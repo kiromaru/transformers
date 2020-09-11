@@ -14,11 +14,10 @@ parser.add_argument('--data_dir', type=str, required=True, help='Data directory'
 #parser.add_argument('--output_dir', type=str, required=True, help='Output directory')
 parser.add_argument('--cache_dir', type=str, required=False, help='Cache directory')
 parser.add_argument('--model_name_or_path', type=str, required=True, help='Model name or path')
+parser.add_argument('--max_seq_length', type=int, required=True, help='Maxium sequence length')
 parser.add_argument('--verbosity', type=str, required=False, choices=[ 'normal', 'verbose' ], default='normal', help='Defines verbosity')
 
 verbosity_level = 'normal'
-
-#csv.field_size_limit(sys.maxsize)
 
 def is_verbose():
     if verbosity_level == 'verbose':
@@ -60,36 +59,33 @@ def get_sentences(row: list, input_columns: list):
 
     return row[start:end]
 
-def replace_words(sentences: list, words_to_mask: int, special_tokens: list, mask_token_id: int):
-    total_range = 0
+def replace_words(sentence, words_to_mask: int, special_tokens: list, mask_token_id: int):
+    total_range = len(sentence[0])
     replaced = 0
-
-    for sentence in sentences:
-        total_range = total_range + len(sentence[0])
 
     while replaced < words_to_mask:
         index = random.randrange(total_range)
-        sentence_index = 0
+        if sentence[0][index] not in special_tokens:
+            sentence[0][index] = mask_token_id
+            replaced += 1
 
-        # Look for actual index in the correct sentence
-        for sentence_index in range(len(sentences)):
-            if index < len(sentences[sentence_index][0]):
-                break
-            index = index - len(sentences[sentence_index][0])
-
-        if sentences[sentence_index][0][index] not in special_tokens:
-            sentences[sentence_index][0][index] = mask_token_id
-            replaced = replaced + 1
-
-def reconstruct_sentence(tokens: list, predicted_indexes: list, special_tokens: list, tokenizer):
+def reconstruct_sentences(tokens: list, predicted_indexes: list, special_tokens: list, tokenizer):
     prediction_index = 0
     for i in range(len(tokens[0])):
         if tokens[0][i] == tokenizer.mask_token_id:
             tokens[0][i] = predicted_indexes[prediction_index]
             prediction_index = prediction_index + 1
 
-    tokens_list = [ elem for elem in tokens[0] if elem not in special_tokens ]
-    return tokenizer.decode(tokens_list)
+    tokens_list = [ elem for elem in tokens[0] ]
+    separator_idx = tokens_list.index(tokenizer.sep_token_id)
+    tokens_list1 = tokens_list[:separator_idx]
+    tokens_list2 = tokens_list[separator_idx + 1 :]
+    tokens_list_clean1 = [ elem for elem in tokens_list1 if elem not in special_tokens ]
+    tokens_list_clean2 = [ elem for elem in tokens_list2 if elem not in special_tokens ]
+    sentences = []
+    sentences.append(tokenizer.decode(tokens_list_clean1))
+    sentences.append(tokenizer.decode(tokens_list_clean2))
+    return sentences
 
 def main():
     script_start = time.time()
@@ -136,61 +132,49 @@ def main():
 
                 # Determine how many words will be replaced
                 sentences = get_sentences(row, input_columns)
-                inputs = []
-                inputs_copy = []
-                word_count = 0
-                for sentence in sentences:
-                    if is_verbose():
-                        print(f'Original sentence: {sentence}')
+                compound_sentence = sentences[0] + tokenizer.sep_token + sentences[1]
+                if is_verbose():
+                    print(f'Compound sentence: {compound_sentence}')
 
-                    input = tokenizer.encode(sentence, return_tensors='pt')
-                    input_copy  = input.clone()
-                    sentence_length = len(input[0])
-
-                    if sentence_length > model.config.max_position_embeddings:
-                        input_copy = torch.zeros(1, model.config.max_position_embeddings, dtype=input.dtype)
-                        input_copy[0] = input[0][:model.config.max_position_embeddings]
-                        input = input_copy.clone()
-                        print (f'Line {line_number} contains sentence of length {sentence_length}, truncating to {model.config.max_position_embeddings}')
-
-                    input_list = input[0].tolist()
-                    count_list = [ elem for elem in input_list if elem not in special_tokens ]
-                    word_count = word_count + len(count_list)
-                    inputs.append(input)
-                    inputs_copy.append(input_copy)
+                input = tokenizer.encode(compound_sentence, return_tensors='pt')
+                input_copy = input.clone()
+                sentence_length = len(input[0])
+                
+                if sentence_length > model.config.max_position_embeddings:
+                    input_copy = torch.zeros(1, model.config.max_position_embeddings, dtype=input.dtype)
+                    input_copy[0] = input[0][:model.config.max_position_embeddings]
+                    input = input_copy.clone()
+                    print (f'Line {line_number} contains sentence of length {sentence_length}, truncating to {model.config.max_position_embeddings}')
 
                 # Replace words with mask token
+                input_list = input[0].tolist()
+                special_token_list = [ elem for elem in input_list if elem in special_tokens ]
+                word_count = len(input[0]) - len(special_token_list)
                 words_to_mask = int(round(parsed_args.percent * word_count))
-                replace_words(inputs, words_to_mask, special_tokens, tokenizer.mask_token_id)
+                replace_words(input, words_to_mask, special_tokens, tokenizer.mask_token_id)
+                mask_token_index = torch.where(input == tokenizer.mask_token_id)[1]
 
                 if is_verbose():
-                    for input in inputs:
-                        print (f'Sentence with masks: {tokenizer.decode(input[0])}')
+                    print (f'Sentences with masks: {tokenizer.decode(input[0])}')
 
                 # Predict words using model
-                result_index = 0
                 line_loss = float(0)
-                for idx in range(len(inputs)):
-                    input = inputs[idx]
-                    input_copy = inputs_copy[idx]
-                    input_copy = input_copy.to(dev)
-                    mask_token_index = torch.where(input == tokenizer.mask_token_id)[1]
-                    if len(mask_token_index) > 0:
-                        model_result = model(input.to(dev), labels=input_copy)
-                        sentence_loss = model_result[0].item()
-                        line_loss += sentence_loss
-                        total_loss += sentence_loss
-                        token_logits = model_result[1]
-                        mask_token_logits = token_logits[0, mask_token_index, :]
-                        predicted_indexes = torch.argmax(mask_token_logits, dim=1)
-                        sentence = reconstruct_sentence(input, predicted_indexes, special_tokens, tokenizer)
-                        row[input_columns[result_index]] = sentence
 
-                        if is_verbose():
-                            print (f'Loss: {sentence_loss}, predicted sentence: {sentence}')
+                model_result = model(input.to(dev), labels=input_copy.to(dev))
+                line_loss = model_result[0].item()
+                total_loss += line_loss
+                token_logits = model_result[1]
+                mask_token_logits = token_logits[0, mask_token_index, :]
+                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
+                sentences = reconstruct_sentences(input, predicted_indexes, special_tokens, tokenizer)
 
-                    result_index = result_index + 1
+                if is_verbose():
+                    print (f'Loss: {line_loss}')
+                    print (f'Predicted sentence 1: {sentences[0]}')
+                    print (f'Predicted sentence 2: {sentences[1]}')
 
+                row[input_columns[0]] = sentences[0]
+                row[input_columns[1]] = sentences[1]
                 row.append(str(line_loss))
                 tsv_writer.writerow(row)
 
