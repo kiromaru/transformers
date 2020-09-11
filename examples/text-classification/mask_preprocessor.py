@@ -160,13 +160,14 @@ def main():
                 # Predict words using model
                 line_loss = float(0)
 
-                model_result = model(input.to(dev), labels=input_copy.to(dev))
-                line_loss = model_result[0].item()
-                total_loss += line_loss
-                token_logits = model_result[1]
-                mask_token_logits = token_logits[0, mask_token_index, :]
-                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
-                sentences = reconstruct_sentences(input, predicted_indexes, special_tokens, tokenizer)
+                if len(mask_token_index) > 0:
+                    model_result = model(input.to(dev), labels=input_copy.to(dev))
+                    line_loss = model_result[0].item()
+                    total_loss += line_loss
+                    token_logits = model_result[1]
+                    mask_token_logits = token_logits[0, mask_token_index, :]
+                    predicted_indexes = torch.argmax(mask_token_logits, dim=1)
+                    sentences = reconstruct_sentences(input, predicted_indexes, special_tokens, tokenizer)
 
                 if is_verbose():
                     print (f'Loss: {line_loss}')
