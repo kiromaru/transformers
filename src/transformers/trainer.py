@@ -629,8 +629,8 @@ class Trainer:
             inputs["mems"] = self._past
 
         outputs = model(**inputs)
-        loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
-        loss += pre_loss   # Add word prediction loss
+        loss = outputs[0] * (1 - self.args.training_w)  # model outputs are always tuple in transformers (see doc)
+        loss += pre_loss * self.args.training_w         # Add word prediction loss
 
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
