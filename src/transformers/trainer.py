@@ -31,6 +31,7 @@ from .trainer_utils import (
     set_seed,
 )
 from .training_args import TrainingArguments
+from .data.datasets.glue import GlueDataset
 
 
 if is_apex_available():
@@ -184,6 +185,7 @@ class Trainer:
         prediction_loss_only=False,
         tb_writer: Optional["SummaryWriter"] = None,
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
+        data_dir: Optional[str] = None,
     ):
         self.model = model.to(args.device)
         self.args = args
@@ -193,6 +195,7 @@ class Trainer:
         self.compute_metrics = compute_metrics
         self.prediction_loss_only = prediction_loss_only
         self.optimizers = optimizers
+        self.data_dir = data_dir
         if tb_writer is not None:
             self.tb_writer = tb_writer
         elif is_tensorboard_available() and self.is_world_master():
@@ -372,7 +375,7 @@ class Trainer:
         """
         return len(dataloader.dataset)
 
-    def train(self, model_path: Optional[str] = None):
+    def train(self, model_path: Optional[str] = None, train_dataset_path: Optional[str] = None):
         """
         Main training entry point.
 
@@ -496,7 +499,13 @@ class Trainer:
                     steps_trained_in_current_epoch -= 1
                     continue
 
-                tr_loss += self._training_step(model, inputs, optimizer)
+                # Get the word-prediction loss for the batch and pass it to _training_step. This method is the
+                # one that calls loss.backward()
+                pre_loss = inputs['pre_loss']
+                avg_pre_loss = pre_loss / (len(inputs['input_ids']))
+                inputs.pop('pre_loss')
+
+                tr_loss += self._training_step(model, inputs, optimizer, avg_pre_loss)
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
@@ -609,7 +618,7 @@ class Trainer:
             logger.info(output)
 
     def _training_step(
-        self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer
+        self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer, pre_loss: float
     ) -> float:
         model.train()
         for k, v in inputs.items():
@@ -621,6 +630,7 @@ class Trainer:
 
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
+        loss += pre_loss   # Add word prediction loss
 
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
@@ -820,6 +830,7 @@ class Trainer:
                 inputs["mems"] = past
 
             with torch.no_grad():
+                inputs.pop('pre_loss')
                 outputs = model(**inputs)
                 if has_labels:
                     step_eval_loss, logits = outputs[:2]

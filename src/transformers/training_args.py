@@ -220,6 +220,11 @@ class TrainingArguments:
         metadata={"help": "If >=0, uses the corresponding part of the output as the past state for next step."},
     )
 
+    preprocess_train: bool = field(
+        default=False, metadata={"help": "Indicates whether the train dataset should be preprocessed on each iteration"}
+    )
+
+
     @property
     def train_batch_size(self) -> int:
         """
