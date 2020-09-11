@@ -11,10 +11,8 @@ parser = argparse.ArgumentParser(description = 'Dataset preprocessor using maske
 parser.add_argument('--percent', type=float, required=False, help='Percentage of words that will be masked', default=0.15)
 parser.add_argument('--task_name', type=str, required=True, help='Task name')
 parser.add_argument('--data_dir', type=str, required=True, help='Data directory')
-#parser.add_argument('--output_dir', type=str, required=True, help='Output directory')
 parser.add_argument('--cache_dir', type=str, required=False, help='Cache directory')
 parser.add_argument('--model_name_or_path', type=str, required=True, help='Model name or path')
-parser.add_argument('--max_seq_length', type=int, required=True, help='Maxium sequence length')
 parser.add_argument('--verbosity', type=str, required=False, choices=[ 'normal', 'verbose' ], default='normal', help='Defines verbosity')
 
 verbosity_level = 'normal'
