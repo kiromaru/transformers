@@ -16,6 +16,7 @@ parser.add_argument('--model_name_or_path', type=str, required=True, help='Model
 parser.add_argument('--verbosity', type=str, required=False, choices=[ 'normal', 'verbose' ], default='normal', help='Defines verbosity')
 
 verbosity_level = 'normal'
+line_modulo = 1000
 
 def is_verbose():
     if verbosity_level == 'verbose':
@@ -177,9 +178,9 @@ def main():
                 row.append(str(line_loss))
                 tsv_writer.writerow(row)
 
-                if line_number % 100 == 0:
+                if line_number % line_modulo == 0:
                     end_time = time.time()
-                    print (f'Processed {line_number} lines. Lines per second: {100 / (end_time - start_time)}')
+                    print (f'Processed {line_number} lines. Lines per second: {line_modulo / (end_time - start_time)}')
                     start_time = time.time()
 
     script_end = time.time()
