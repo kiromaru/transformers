@@ -229,6 +229,10 @@ class TrainingArguments:
         metadata={"help": "Determines the weight of loss1 (from word prediction) againt loss2 (from finetuning). Total loss = W * loss1 + (1 - W) * loss2"}
     )
 
+    log_loss: bool = field(
+        default=False,
+        metadata={"help": "Whether to log loss at every iteration"}
+    )
 
     @property
     def train_batch_size(self) -> int:
