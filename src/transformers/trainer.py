@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import warnings
+import csv
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -228,6 +229,11 @@ class Trainer:
                 ),
                 FutureWarning,
             )
+        # Setup log file if reporting loss
+        if self.args.log_loss:
+            loss_log_filename = os.path.join(self.args.output_dir, "loss.csv")
+            loss_log_file = open(loss_log_filename, 'w', encoding='utf-8', newline='')
+            self.tsv_loss_log = csv.writer(loss_log_file, delimiter='\t')
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -634,7 +640,8 @@ class Trainer:
         combined_loss += (pre_loss * self.args.training_w)  # Add word prediction loss
 
         if self.args.log_loss:
-            logger.info("W: %f loss1 (from word prediction): %f loss2 (from finetuning): %f (W * loss1) + ((1- W) * loss2): %f", self.args.training_w, pre_loss, loss.item(), combined_loss)
+            logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
+            self.tsv_loss_log.writerow(logrow)
 
         loss = combined_loss
 
