@@ -178,6 +178,20 @@ class Trainer:
     prediction_model: Optional[PreTrainedModel] = None
     prediction_tokenizer: Optional[PreTrainedTokenizer]
 
+    prediction_layers = [
+        'cls.predictions.bias',
+        'cls.predictions.transform.dense.weight',
+        'cls.predictions.transform.dense.bias',
+        'cls.predictions.transform.LayerNorm.weight',
+        'cls.predictions.transform.LayerNorm.bias',
+        'cls.predictions.decoder.weight',
+        'cls.predictions.decoder.bias'
+    ]
+    classifier_layers = [
+        'classifier.weight',
+        'classifier.bias'
+    ]
+
     def __init__(
         self,
         model: PreTrainedModel,
@@ -240,7 +254,7 @@ class Trainer:
             loss_log_file = open(loss_log_filename, 'w', encoding='utf-8', newline='')
             self.tsv_loss_log = csv.writer(loss_log_file, delimiter='\t')
 
-        self.prediction_model = prediction_model
+        self.prediction_model = prediction_model.to(args.device)
         self.prediction_tokenizer = prediction_tokenizer
 
     def get_train_dataloader(self) -> DataLoader:
@@ -637,6 +651,20 @@ class Trainer:
 
         if self.args.past_index >= 0 and self._past is not None:
             inputs["mems"] = self._past
+
+        # Copy current weights to prediction model
+        prediction_state = self.prediction_model.state_dict()
+        classification_state = model.state_dict()
+        classification_keys = classification_state.keys()
+
+        for model_key in classification_keys:
+            if not model_key in self.classifier_layers:
+                prediction_state[model_key] = classification_state[model_key]
+        self.prediction_model.load_state_dict(prediction_state)
+
+        # Replace words with masks
+        prediction_labels = inputs['input_ids']
+        prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
 
         pre_loss = 0
         outputs = model(**inputs)
