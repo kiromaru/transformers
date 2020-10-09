@@ -22,6 +22,7 @@ from tqdm.auto import tqdm, trange
 from .data.data_collator import DataCollator, default_data_collator
 from .file_utils import is_apex_available, is_torch_tpu_available
 from .modeling_utils import PreTrainedModel
+from .tokenization_utils import PreTrainedTokenizer
 from .optimization import AdamW, get_linear_schedule_with_warmup
 from .trainer_utils import (
     PREFIX_CHECKPOINT_DIR,
@@ -174,6 +175,8 @@ class Trainer:
     optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None
     global_step: Optional[int] = None
     epoch: Optional[float] = None
+    prediction_model: Optional[PreTrainedModel] = None
+    prediction_tokenizer: Optional[PreTrainedTokenizer]
 
     def __init__(
         self,
@@ -187,6 +190,8 @@ class Trainer:
         tb_writer: Optional["SummaryWriter"] = None,
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
         data_dir: Optional[str] = None,
+        prediction_model: Optional[PreTrainedModel] = None,
+        prediction_tokenizer: Optional[PreTrainedTokenizer] = None,
     ):
         self.model = model.to(args.device)
         self.args = args
@@ -234,6 +239,9 @@ class Trainer:
             loss_log_filename = os.path.join(self.args.output_dir, "loss.csv")
             loss_log_file = open(loss_log_filename, 'w', encoding='utf-8', newline='')
             self.tsv_loss_log = csv.writer(loss_log_file, delimiter='\t')
+
+        self.prediction_model = prediction_model
+        self.prediction_tokenizer = prediction_tokenizer
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -507,11 +515,7 @@ class Trainer:
 
                 # Get the word-prediction loss for the batch and pass it to _training_step. This method is the
                 # one that calls loss.backward()
-                pre_loss = inputs['pre_loss']
-                avg_pre_loss = pre_loss / (len(inputs['input_ids']))
-                inputs.pop('pre_loss')
-
-                tr_loss += self._training_step(model, inputs, optimizer, avg_pre_loss)
+                tr_loss += self._training_step(model, inputs, optimizer)
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
@@ -624,7 +628,7 @@ class Trainer:
             logger.info(output)
 
     def _training_step(
-        self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer, pre_loss: float
+        self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer
     ) -> float:
         model.train()
         for k, v in inputs.items():
@@ -634,14 +638,15 @@ class Trainer:
         if self.args.past_index >= 0 and self._past is not None:
             inputs["mems"] = self._past
 
+        pre_loss = 0
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         combined_loss = (1 - self.args.training_w) * loss   # Loss from finetuning
         combined_loss += (pre_loss * self.args.training_w)  # Add word prediction loss
 
-        if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
-            self.tsv_loss_log.writerow(logrow)
+        # if self.args.log_loss:
+        #     logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
+        #     self.tsv_loss_log.writerow(logrow)
 
         loss = combined_loss
 
@@ -843,7 +848,6 @@ class Trainer:
                 inputs["mems"] = past
 
             with torch.no_grad():
-                inputs.pop('pre_loss')
                 outputs = model(**inputs)
                 if has_labels:
                     step_eval_loss, logits = outputs[:2]
