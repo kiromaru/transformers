@@ -25,7 +25,7 @@ from typing import Callable, Dict, Optional
 
 import numpy as np
 
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset
+from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset, AutoModelWithLMHead
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
 from transformers import (
     HfArgumentParser,
@@ -132,10 +132,17 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
+    prediction_model = AutoModelWithLMHead.from_pretrained(
+        model_args.model_name_or_path,
+        config=config,
+        cache_dir=model_args.cache_dir,
+    )
 
     # Get datasets
     train_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if (training_args.do_train and not training_args.preprocess_train) else None
+        GlueDataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir)
+        if training_args.do_train
+        else None
     )
     eval_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
@@ -161,6 +168,8 @@ def main():
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
+        prediction_model=prediction_model,
+        prediction_tokenizer=tokenizer,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,

@@ -5,6 +5,7 @@ import re
 import shutil
 import warnings
 import csv
+import random
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -256,6 +257,8 @@ class Trainer:
 
         self.prediction_model = prediction_model.to(args.device)
         self.prediction_tokenizer = prediction_tokenizer
+        if self.prediction_tokenizer is not None:
+            self.special_tokens = [ self.prediction_tokenizer.cls_token_id, self.prediction_tokenizer.sep_token_id, self.prediction_tokenizer.mask_token_id ]
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -662,19 +665,43 @@ class Trainer:
                 prediction_state[model_key] = classification_state[model_key]
         self.prediction_model.load_state_dict(prediction_state)
 
-        # Replace words with masks
-        prediction_labels = inputs['input_ids']
-        prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
+        # Original input is the labels
+        prediction_labels = inputs['input_ids'].clone()
 
-        pre_loss = 0
+        # Replace words with masks
+        replace_percentage = 0.15
+        for sentence_idx in range(len(inputs['input_ids'])):
+            sep_idxs = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.sep_token_id)
+            max_sep_idx = torch.argmax(sep_idxs[0])
+            last_separator_idx = sep_idxs[0][max_sep_idx].item()
+            words_to_replace = int(round(last_separator_idx * replace_percentage))
+            while words_to_replace > 0:
+                replace_idx = random.randrange(last_separator_idx)
+                if inputs['input_ids'][sentence_idx][replace_idx] not in self.special_tokens:
+                    inputs['input_ids'][sentence_idx][replace_idx] = self.prediction_tokenizer.mask_token_id
+                    words_to_replace -= 1
+
+        prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
+        pre_loss = (prediction_output[0].item() / len(inputs['input_ids']))
+        token_logits = prediction_output[1]
+
+        # Replace predicted words in input
+        for sentence_idx in range(len(inputs['input_ids'])):
+            mask_token_index = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.mask_token_id)
+            if len(mask_token_index[0]) > 0:
+                mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
+                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
+                for predicted_index in range(len(mask_token_index[0])):
+                    inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         combined_loss = (1 - self.args.training_w) * loss   # Loss from finetuning
         combined_loss += (pre_loss * self.args.training_w)  # Add word prediction loss
 
-        # if self.args.log_loss:
-        #     logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
-        #     self.tsv_loss_log.writerow(logrow)
+        if self.args.log_loss:
+            logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
+            self.tsv_loss_log.writerow(logrow)
 
         loss = combined_loss
 
