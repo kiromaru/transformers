@@ -190,7 +190,11 @@ class Trainer:
     ]
     classifier_layers = [
         'classifier.weight',
-        'classifier.bias'
+        'classifier.bias',
+        'classification_head.dense.weight',
+        'classification_head.dense.bias',
+        'classification_head.out_proj.weight',
+        'classification_head.out_proj.bias'
     ]
 
     def __init__(
@@ -258,7 +262,14 @@ class Trainer:
         self.prediction_model = prediction_model.to(args.device)
         self.prediction_tokenizer = prediction_tokenizer
         if self.prediction_tokenizer is not None:
-            self.special_tokens = [ self.prediction_tokenizer.cls_token_id, self.prediction_tokenizer.sep_token_id, self.prediction_tokenizer.mask_token_id ]
+            self.special_tokens = [
+                self.prediction_tokenizer.cls_token_id,
+                self.prediction_tokenizer.sep_token_id,
+                self.prediction_tokenizer.mask_token_id,
+                self.prediction_tokenizer.eos_token_id,
+                self.prediction_tokenizer.bos_token_id,
+                self.prediction_tokenizer.pad_token_id
+            ]
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -692,7 +703,8 @@ class Trainer:
                 mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
                 predicted_indexes = torch.argmax(mask_token_logits, dim=1)
                 for predicted_index in range(len(mask_token_index[0])):
-                    inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+                    if predicted_indexes[predicted_index] not in self.special_tokens:
+                        inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
 
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
