@@ -178,6 +178,7 @@ class Trainer:
     epoch: Optional[float] = None
     prediction_model: Optional[PreTrainedModel] = None
     prediction_tokenizer: Optional[PreTrainedTokenizer]
+    loss_writer: Optional["SummaryWriter"] = None
 
     prediction_layers = [
         'cls.predictions.bias',
@@ -270,6 +271,9 @@ class Trainer:
                 self.prediction_tokenizer.bos_token_id,
                 self.prediction_tokenizer.pad_token_id
             ]
+
+        if is_tensorboard_available():
+            self.loss_writer = SummaryWriter(log_dir=self.args.logging_dir)
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -710,6 +714,10 @@ class Trainer:
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         combined_loss = (1 - self.args.training_w) * loss   # Loss from finetuning
         combined_loss += (pre_loss * self.args.training_w)  # Add word prediction loss
+
+        if self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/prediction", pre_loss)
+            self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
 
         if self.args.log_loss:
             logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
