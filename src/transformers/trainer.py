@@ -56,6 +56,8 @@ except ImportError:
 
         _has_tensorboard = True
     except ImportError:
+        print("Could not import tensorboard from either torch.utils.tensorboard or tensorboardX")
+        raise EnvironmentError
         _has_tensorboard = False
 
 
