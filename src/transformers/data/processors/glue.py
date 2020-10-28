@@ -263,11 +263,11 @@ class MnliMismatchedProcessor(MnliProcessor):
         """See base class."""
         return self._create_examples(self._read_tsv(os.path.join(data_dir, "test_mismatched.tsv")), "test_mismatched")
 
-class MnliHansProcessor(DataProcessor):
-    """Processor for the MultiNLI with HANS data set"""
-    
+class HansProcessor(DataProcessor):
+    """Processor for the HANS dataset"""
+
     def get_example_from_tensor_dict(self, tensor_dict):
-        """See base class"""
+        """See base class."""
         return InputExample(
             tensor_dict["idx"].numpy(),
             tensor_dict["premise"].numpy().decode("utf-8"),
@@ -276,19 +276,19 @@ class MnliHansProcessor(DataProcessor):
         )
 
     def get_train_examples(self, data_dir):
-        """See base class"""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "heuristics_train_set.txt")), "train")
 
     def get_dev_examples(self, data_dir):
-        """See base class"""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev_matched.tsv")), "dev_matched")
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "heuristics_evaluation_set.txt")), "dev")
 
     def get_test_examples(self, data_dir):
-        """See base class"""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test_matched.tsv")), "test_matched")
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "heuristics_evaluation_set.txt")), "test")
 
     def get_labels(self):
-        """See base class"""
+        """See base class."""
         return ["entailment", "non-entailment"]
 
     def _create_examples(self, lines, set_type):
@@ -297,22 +297,12 @@ class MnliHansProcessor(DataProcessor):
         for(i, line) in enumerate(lines):
             if i == 0:
                 continue
-            guid = "%s-%s" % (set_type, line[0])
-            text_a = line[8]
-            text_b = line[9]
-            label = None if set_type.startswith("test") else line[-1]
+            guid = "%s-%s" % (set_type, line[7])
+            text_a = line[5]
+            text_b = line[6]
+            label = line[0]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
-
-class MnliHansMismatchedProcessor(MnliHansProcessor):
-    """Processor for the MultiNLI with HANS mismatched data set"""
-
-    def get_dev_examples(self, data_dir):
-        """See base class"""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev_mismatched.tsv")), "dev_mismatched")
-
-    def get_test_examples(self, data_dir):
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test_mismatched.tsv")), "test_mismatched")
 
 class ColaProcessor(DataProcessor):
     """Processor for the CoLA data set (GLUE version)."""
@@ -625,7 +615,7 @@ glue_tasks_num_labels = {
     "qnli": 2,
     "rte": 2,
     "wnli": 2,
-    "mnli-hans": 2
+    "hans": 2
 }
 
 glue_processors = {
@@ -639,8 +629,7 @@ glue_processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
-    "mnli-hans": MnliHansProcessor,
-    "mnli-hans-mm": MnliHansMismatchedProcessor,
+    "hans": HansProcessor,
 }
 
 glue_output_modes = {
@@ -654,6 +643,5 @@ glue_output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
-    "mnli-hans": "classification",
-    "mnli-hans-mm": "classification",
+    "hans": "classification",
 }
