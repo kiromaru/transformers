@@ -262,17 +262,18 @@ class Trainer:
             loss_log_file = open(loss_log_filename, 'w', encoding='utf-8', newline='')
             self.tsv_loss_log = csv.writer(loss_log_file, delimiter='\t')
 
-        self.prediction_model = prediction_model.to(args.device)
-        self.prediction_tokenizer = prediction_tokenizer
-        if self.prediction_tokenizer is not None:
-            self.special_tokens = [
-                self.prediction_tokenizer.cls_token_id,
-                self.prediction_tokenizer.sep_token_id,
-                self.prediction_tokenizer.mask_token_id,
-                self.prediction_tokenizer.eos_token_id,
-                self.prediction_tokenizer.bos_token_id,
-                self.prediction_tokenizer.pad_token_id
-            ]
+        if prediction_model is not None:
+            self.prediction_model = prediction_model.to(args.device)
+            self.prediction_tokenizer = prediction_tokenizer
+            if self.prediction_tokenizer is not None:
+                self.special_tokens = [
+                    self.prediction_tokenizer.cls_token_id,
+                    self.prediction_tokenizer.sep_token_id,
+                    self.prediction_tokenizer.mask_token_id,
+                    self.prediction_tokenizer.eos_token_id,
+                    self.prediction_tokenizer.bos_token_id,
+                    self.prediction_tokenizer.pad_token_id
+                ]
 
         if is_tensorboard_available():
             self.loss_writer = SummaryWriter(log_dir=self.args.logging_dir)
@@ -686,6 +687,9 @@ class Trainer:
                     words_to_replace -= 1
 
     def _word_prediction(self, source_model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]):
+        if self.prediction_model is None:
+            return 0.0
+            
         self.prediction_model.eval()
 
         # Original input is the labels
