@@ -180,6 +180,7 @@ class Trainer:
     epoch: Optional[float] = None
     prediction_model: Optional[PreTrainedModel] = None
     prediction_tokenizer: Optional[PreTrainedTokenizer]
+    prediction_optimizer: Optional[torch.optim.Optimizer]
     loss_writer: Optional["SummaryWriter"] = None
 
     prediction_layers = [
@@ -274,6 +275,19 @@ class Trainer:
                     self.prediction_tokenizer.bos_token_id,
                     self.prediction_tokenizer.pad_token_id
                 ]
+
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in self.prediction_model.named_parameters() if not any(nd in n for nd in no_decay)],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in self.prediction_model.named_parameters() if any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+            ]
+            self.prediction_optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate, eps=self.args.adam_epsilon)
 
         if is_tensorboard_available():
             self.loss_writer = SummaryWriter(log_dir=self.args.logging_dir)
@@ -674,7 +688,7 @@ class Trainer:
         self.prediction_model.load_state_dict(prediction_state)
 
     def _replace_words_with_masks(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
-        replace_percentage = 0.15
+        replace_percentage = self.args.word_replacement_pct
         for sentence_idx in range(len(inputs['input_ids'])):
             sep_idxs = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.sep_token_id)
             max_sep_idx = torch.argmax(sep_idxs[0])
@@ -686,35 +700,43 @@ class Trainer:
                     inputs['input_ids'][sentence_idx][replace_idx] = self.prediction_tokenizer.mask_token_id
                     words_to_replace -= 1
 
-    def _word_prediction(self, source_model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]):
+    def _word_prediction(self, source_model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], do_prediction: bool):
         if self.prediction_model is None:
             return 0.0
             
-        self.prediction_model.eval()
+        if do_prediction:
+            self.prediction_model.eval()
+        else:
+            self.prediction_model.train()
 
         # Original input is the labels
         prediction_labels = inputs['input_ids'].clone()
 
-        self._copy_weights_to_prediction_model(source_model);
+        #self._copy_weights_to_prediction_model(source_model);
         self._replace_words_with_masks(inputs)
 
         # Perform word prediction
-        with torch.no_grad():
-            prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
-            pre_loss = (prediction_output[0].item() / len(inputs['input_ids']))
-            token_logits = prediction_output[1]
+        prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
+        pre_loss = prediction_output[0]
+        pre_loss_flt = prediction_output[0].item()
+        token_logits = prediction_output[1]
 
-            # Replace predicted words in input
-            for sentence_idx in range(len(inputs['input_ids'])):
-                mask_token_index = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.mask_token_id)
-                if len(mask_token_index[0]) > 0:
-                    mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
-                    predicted_indexes = torch.argmax(mask_token_logits, dim=1)
-                    for predicted_index in range(len(mask_token_index[0])):
-                        if predicted_indexes[predicted_index] not in self.special_tokens:
-                            inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+        if not do_prediction:
+            pre_loss.backward()
+            self.prediction_optimizer.step()
+            self.prediction_model.zero_grad()
 
-        return pre_loss
+        # Replace predicted words in input
+        for sentence_idx in range(len(inputs['input_ids'])):
+            mask_token_index = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.mask_token_id)
+            if len(mask_token_index[0]) > 0:
+                mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
+                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
+                for predicted_index in range(len(mask_token_index[0])):
+                    if predicted_indexes[predicted_index] not in self.special_tokens:
+                        inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+
+        return pre_loss_flt
 
     def _training_step(
         self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer
@@ -728,7 +750,7 @@ class Trainer:
             inputs["mems"] = self._past
 
         # Word prediction
-        pre_loss = self._word_prediction(model, inputs)
+        pre_loss = self._word_prediction(model, inputs, False)
 
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
@@ -966,7 +988,7 @@ class Trainer:
                         label_ids = torch.cat((label_ids, inputs["labels"].detach()), dim=0)
 
             # Perform word prediction
-            pre_loss = self._word_prediction(model, inputs)
+            pre_loss = self._word_prediction(model, inputs, True)
 
             if self.loss_writer:
                 self.loss_writer.add_scalar("EvalLoss/prediction", pre_loss)

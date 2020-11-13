@@ -229,6 +229,11 @@ class TrainingArguments:
         metadata={"help": "Determines the weight of loss1 (from word prediction) againt loss2 (from finetuning). Total loss = W * loss1 + (1 - W) * loss2"}
     )
 
+    word_replacement_pct: float = field(
+        default=0.15,
+        metadata={"help": "Determines the percentage of words that are replaced in the original input"}
+    )
+
     log_loss: bool = field(
         default=False,
         metadata={"help": "Whether to log loss at every iteration"}
