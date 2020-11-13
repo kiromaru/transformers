@@ -722,6 +722,8 @@ class Trainer:
         token_logits = prediction_output[1]
 
         if not do_prediction:
+            pre_loss = pre_loss * self.args.training_w
+            pre_loss_flt = pre_loss.item()
             pre_loss.backward()
             self.prediction_optimizer.step()
             self.prediction_model.zero_grad()
@@ -754,18 +756,16 @@ class Trainer:
 
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
-        combined_loss = (1 - self.args.training_w) * loss   # Loss from finetuning
-        combined_loss += (pre_loss * self.args.training_w)  # Add word prediction loss
+        loss = (1.0 - self.args.training_w) * loss
+        combined_loss = pre_loss + loss.item()
 
         if self.loss_writer:
             self.loss_writer.add_scalar("TrainingLoss/prediction", pre_loss)
             self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
 
         if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss.item() ]
+            logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss ]
             self.tsv_loss_log.writerow(logrow)
-
-        loss = combined_loss
 
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
