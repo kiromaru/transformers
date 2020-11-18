@@ -181,6 +181,7 @@ class Trainer:
     prediction_model: Optional[PreTrainedModel] = None
     prediction_tokenizer: Optional[PreTrainedTokenizer]
     prediction_optimizer: Optional[torch.optim.Optimizer]
+    finetuning_loss: float = 0.0
     loss_writer: Optional["SummaryWriter"] = None
 
     prediction_layers = [
@@ -700,11 +701,21 @@ class Trainer:
                     inputs['input_ids'][sentence_idx][replace_idx] = self.prediction_tokenizer.mask_token_id
                     words_to_replace -= 1
 
-    def _word_prediction(self, source_model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], do_prediction: bool):
+    def _replace_predicted_words(self, inputs: Dict[str, Union[torch.Tensor, Any]], token_logits):
+        for sentence_idx in range(len(inputs['input_ids'])):
+            mask_token_index = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.mask_token_id)
+            if len(mask_token_index[0]) > 0:
+                mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
+                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
+                for predicted_index in range(len(mask_token_index[0])):
+                    if predicted_indexes[predicted_index] not in self.special_tokens:
+                        inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+
+    def _word_prediction(self, source_model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], do_prediction: bool) -> float:
         if self.prediction_model is None:
             return 0.0
-            
-        if do_prediction:
+
+        if do_prediction:            
             self.prediction_model.eval()
         else:
             self.prediction_model.train()
@@ -718,27 +729,25 @@ class Trainer:
         # Perform word prediction
         prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
         pre_loss = prediction_output[0]
-        pre_loss_flt = prediction_output[0].item()
         token_logits = prediction_output[1]
+        pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
+
 
         if not do_prediction:
             pre_loss = pre_loss * self.args.training_w
-            pre_loss_flt = pre_loss.item()
+            # Combined loss
+            pre_loss = pre_loss + self.finetuning_loss
             pre_loss.backward()
             self.prediction_optimizer.step()
             self.prediction_model.zero_grad()
 
         # Replace predicted words in input
-        for sentence_idx in range(len(inputs['input_ids'])):
-            mask_token_index = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.mask_token_id)
-            if len(mask_token_index[0]) > 0:
-                mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
-                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
-                for predicted_index in range(len(mask_token_index[0])):
-                    if predicted_indexes[predicted_index] not in self.special_tokens:
-                        inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+        self._replace_predicted_words(inputs, token_logits)
 
-        return pre_loss_flt
+        if not do_prediction and self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/prediction", pre_loss.item())
+
+        return pre_loss.item()
 
     def _training_step(
         self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer
@@ -753,15 +762,20 @@ class Trainer:
 
         # Word prediction
         pre_loss = self._word_prediction(model, inputs, False)
-
+        
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         loss = (1.0 - self.args.training_w) * loss
-        combined_loss = pre_loss + loss.item()
+        self.finetuning_loss = loss.item()
 
         if self.loss_writer:
-            self.loss_writer.add_scalar("TrainingLoss/prediction", pre_loss)
             self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
+
+        # Combined loss
+        loss = loss + pre_loss
+
+        if self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
 
         if self.args.log_loss:
             logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss ]

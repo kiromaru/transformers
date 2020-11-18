@@ -234,6 +234,11 @@ class TrainingArguments:
         metadata={"help": "Determines the percentage of words that are replaced in the original input"}
     )
 
+    word_prediction_loss_atenuator: float = field(
+        default=10.0,
+        metadata={"help": "loss1 (from word prediction) will be divided by this number before calculating combined loss"}
+    )
+
     log_loss: bool = field(
         default=False,
         metadata={"help": "Whether to log loss at every iteration"}
