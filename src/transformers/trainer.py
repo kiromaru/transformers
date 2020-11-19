@@ -786,13 +786,14 @@ class Trainer:
             self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
 
         # Combined loss
+        loss_flt = loss.item()
         loss = loss + pre_loss
 
         if self.loss_writer:
             self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
 
         if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, loss.item(), combined_loss ]
+            logrow = [ self.args.training_w, pre_loss, loss_flt, loss.item() ]
             self.tsv_loss_log.writerow(logrow)
 
         if self.args.past_index >= 0:
@@ -809,6 +810,7 @@ class Trainer:
         else:
             loss.backward()
 
+        # Now do the actual word prediction training
         self._word_prediction_training(model, loss.item())
 
         return loss.item()

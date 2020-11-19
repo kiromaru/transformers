@@ -220,10 +220,6 @@ class TrainingArguments:
         metadata={"help": "If >=0, uses the corresponding part of the output as the past state for next step."},
     )
 
-    preprocess_train: bool = field(
-        default=False, metadata={"help": "Indicates whether the train dataset should be preprocessed on each iteration"}
-    )
-
     training_w: float = field(
         default=0.5,
         metadata={"help": "Determines the weight of loss1 (from word prediction) againt loss2 (from finetuning). Total loss = W * loss1 + (1 - W) * loss2"}
