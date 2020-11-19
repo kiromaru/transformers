@@ -181,7 +181,6 @@ class Trainer:
     prediction_model: Optional[PreTrainedModel] = None
     prediction_tokenizer: Optional[PreTrainedTokenizer]
     prediction_optimizer: Optional[torch.optim.Optimizer]
-    finetuning_loss: float = 0.0
     loss_writer: Optional["SummaryWriter"] = None
 
     prediction_layers = [
@@ -711,41 +710,57 @@ class Trainer:
                     if predicted_indexes[predicted_index] not in self.special_tokens:
                         inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
 
-    def _word_prediction(self, source_model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], do_prediction: bool) -> float:
+    def _word_prediction(self, inputs: Dict[str, Union[torch.Tensor, Any]], replace_words: bool) -> float:
         if self.prediction_model is None:
             return 0.0
 
-        if do_prediction:            
-            self.prediction_model.eval()
-        else:
-            self.prediction_model.train()
+        self.prediction_model.eval()
 
         # Original input is the labels
-        prediction_labels = inputs['input_ids'].clone()
+        self.prediction_labels = inputs['input_ids'].clone()
 
         #self._copy_weights_to_prediction_model(source_model);
         self._replace_words_with_masks(inputs)
+        self.masked_input = inputs['input_ids'].clone()
 
         # Perform word prediction
-        prediction_output = self.prediction_model(inputs['input_ids'], labels=prediction_labels)
+        prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
         pre_loss = prediction_output[0]
         token_logits = prediction_output[1]
         pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
 
+        if replace_words:
+            # Replace predicted words in input
+            self._replace_predicted_words(inputs, token_logits)
 
-        if not do_prediction:
-            pre_loss = pre_loss * self.args.training_w
-            # Combined loss
-            pre_loss = pre_loss + self.finetuning_loss
-            pre_loss.backward()
-            self.prediction_optimizer.step()
-            self.prediction_model.zero_grad()
+        return pre_loss.item()
 
-        # Replace predicted words in input
-        self._replace_predicted_words(inputs, token_logits)
+    def _word_prediction_training(self, inputs: Dict[str, Union[torch.Tensor, Any]], finetuning_loss: float) -> float:
+        if self.prediction_model is None:
+            return 0.0
 
-        if not do_prediction and self.loss_writer:
+        self.prediction_model.train()
+
+        # We should already have labels and masked input
+        # Perform word prediction
+        prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
+        pre_loss = prediction_output[0]
+        token_logits = prediction_output[1]
+        pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
+
+        # Optimization
+        pre_loss = pre_loss * self.args.training_w
+        if self.loss_writer:
             self.loss_writer.add_scalar("TrainingLoss/prediction", pre_loss.item())
+
+        # Combined loss
+        pre_loss = pre_loss + finetuning_loss
+        pre_loss.backward()
+        self.prediction_optimizer.step()
+        self.prediction_model.zero_grad()
+
+        # No need to replace words again
+        #self._replace_predicted_words(inputs, token_logits)
 
         return pre_loss.item()
 
@@ -761,12 +776,11 @@ class Trainer:
             inputs["mems"] = self._past
 
         # Word prediction
-        pre_loss = self._word_prediction(model, inputs, False)
+        pre_loss = self._word_prediction(inputs, True)
         
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         loss = (1.0 - self.args.training_w) * loss
-        self.finetuning_loss = loss.item()
 
         if self.loss_writer:
             self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
@@ -794,6 +808,8 @@ class Trainer:
                 scaled_loss.backward()
         else:
             loss.backward()
+
+        self._word_prediction_training(model, loss.item())
 
         return loss.item()
 
@@ -1002,7 +1018,7 @@ class Trainer:
                         label_ids = torch.cat((label_ids, inputs["labels"].detach()), dim=0)
 
             # Perform word prediction
-            pre_loss = self._word_prediction(model, inputs, True)
+            pre_loss = self._word_prediction(inputs, False)
 
             if self.loss_writer:
                 self.loss_writer.add_scalar("EvalLoss/prediction", pre_loss)
