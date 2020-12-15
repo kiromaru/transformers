@@ -240,6 +240,11 @@ class TrainingArguments:
         metadata={"help": "Whether to log loss at every iteration"}
     )
 
+    switch_input_sentences: bool = field(
+        default=False,
+        metadata={"help": "When input is two sentences, switch the sentences before training"}
+    )
+
     @property
     def train_batch_size(self) -> int:
         """

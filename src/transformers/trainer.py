@@ -710,6 +710,12 @@ class Trainer:
                     if predicted_indexes[predicted_index] not in self.special_tokens:
                         inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
 
+    def _switch_input_sentences(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
+        for sentence_idx in range(len(inputs['input_ids'])):
+            sep_idxs = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.sep_token_id)
+            # Save first sentence
+            torch.tensor()
+
     def _word_prediction(self, inputs: Dict[str, Union[torch.Tensor, Any]], replace_words: bool) -> float:
         if self.prediction_model is None:
             return 0.0
