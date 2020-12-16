@@ -1042,7 +1042,7 @@ class Trainer:
                 if self.args.past_index >= 0:
                     past = outputs[self.args.past_index if has_labels else self.args.past_index - 1]
 
-                if self.args.switch_input_sentences:
+                if self.args.switch_input_sentences and has_labels:
                     self._switch_input_sentences(inputs)
                     switch_outputs = model(**inputs)
                     switch_loss = switch_outputs[0].item()
@@ -1065,9 +1065,11 @@ class Trainer:
 
             if self.loss_writer:
                 self.loss_writer.add_scalar("EvalLoss/prediction", pre_loss)
-                self.loss_writer.add_scalar("EvalLoss/finetuning", classification_loss)
-                if self.args.switch_input_sentences:
-                    self.loss_writer.add_scalar("EvalLoss/regular_sentence_order")
+                if not self.args.switch_input_sentences:
+                    self.loss_writer.add_scalar("EvalLoss/finetuning", classification_loss)
+                else:
+                    self.loss_writer.add_scalar("EvalLoss/regular_sentence_order", classification_loss)
+                    self.loss_writer.add_scalar("EvalLoss/finetuning", switch_loss)
 
         if self.args.local_rank != -1:
             # In distributed mode, concatenate all results from all nodes:
