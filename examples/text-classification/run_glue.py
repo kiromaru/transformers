@@ -132,6 +132,12 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
+    switched_model = AutoModelForSequenceClassification.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir,
+    )
     prediction_model = AutoModelWithLMHead.from_pretrained(
         model_args.model_name_or_path,
         config=config,
@@ -170,6 +176,7 @@ def main():
         model=model,
         prediction_model=prediction_model,
         prediction_tokenizer=tokenizer,
+        switched_model=switched_model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
