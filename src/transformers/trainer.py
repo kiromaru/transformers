@@ -849,7 +849,7 @@ class Trainer:
             for k, v in inputs.items():
                 if isinstance(v, torch.Tensor):
                     switched_inputs[k] = v.clone()
-                    
+
             self._switch_input_sentences(switched_inputs)
             self.switched_model.eval()
             with torch.no_grad():
@@ -857,9 +857,6 @@ class Trainer:
                 switch_outputs = self.switched_model(**switched_inputs)
                 switch_loss = switch_outputs[0].item()
                 switch_loss = self.args.training_w * switch_loss
-                if self.loss_writer:
-                    self.loss_writer.add_scalar("TrainingLoss/switched_sentences", switch_loss)
-
 
         outputs = model(**inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
