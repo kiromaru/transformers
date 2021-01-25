@@ -220,10 +220,10 @@ class TrainingArguments:
         metadata={"help": "If >=0, uses the corresponding part of the output as the past state for next step."},
     )
 
-    training_w: float = field(
-        default=0.5,
-        metadata={"help": "Determines the weight of loss1 (from word prediction) againt loss2 (from finetuning). Total loss = W * loss1 + (1 - W) * loss2"}
-    )
+    # training_w: float = field(
+    #     default=0.5,
+    #     metadata={"help": "Determines the weight of loss1 (from word prediction) againt loss2 (from finetuning). Total loss = W * loss1 + (1 - W) * loss2"}
+    # )
 
     word_replacement_pct: float = field(
         default=0.15,
@@ -240,9 +240,19 @@ class TrainingArguments:
         metadata={"help": "Whether to log loss at every iteration"}
     )
 
-    switch_input_sentences: bool = field(
-        default=False,
-        metadata={"help": "When input is two sentences, switch the sentences before training"}
+    # switch_input_sentences: bool = field(
+    #     default=False,
+    #     metadata={"help": "When input is two sentences, switch the sentences before training"}
+    # )
+
+    training_w1: float = field(
+        default=0.33,
+        metadata={"help": "loss1 (from word prediction) will be multiplied by this factor. Total loss = W1 * loss1 + W2 * loss2 + (1 - W1 - W2) * loss3"}
+    )
+
+    training_w2: float = field(
+        default=0.33,
+        metadata={"help": "loss2 (from input switching) will be multiplied by this factor. Total loss = W1 * loss1 + W2 * loss2 + (1 - W1 - W2) * loss3"}
     )
 
     @property
