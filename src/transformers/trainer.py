@@ -787,7 +787,7 @@ class Trainer:
 
         return pre_loss.item()
 
-    def _word_prediction_training(self, inputs: Dict[str, Union[torch.Tensor, Any]], finetuning_loss: float, switch_input_loss: float) -> float:
+    def _word_prediction_training(self, finetuning_loss: float, switch_input_loss: float) -> float:
         if self.prediction_model is None:
             return 0.0
 
@@ -810,9 +810,6 @@ class Trainer:
         pre_loss.backward()
         self.prediction_optimizer.step()
         self.prediction_model.zero_grad()
-
-        # No need to replace words again
-        #self._replace_predicted_words(inputs, token_logits)
 
         return pre_loss.item()
 
@@ -870,13 +867,13 @@ class Trainer:
         pre_loss = 0
         switch_loss = 0
 
-        if self.args.training_w1 != 0.0:
-            # Word prediction
-            pre_loss = self._word_prediction(inputs, True)
-
         if self.args.training_w2 != 0.0:
             # Switched input
             switch_loss, switched_inputs = self._switch_input_sentences_loss(inputs)
+
+        if self.args.training_w1 != 0.0:
+            # Word prediction
+            pre_loss = self._word_prediction(inputs, True)
 
         fine_tuning_w = 1.0 - self.args.training_w1 - self.args.training_w2
 
@@ -888,14 +885,14 @@ class Trainer:
             self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
 
         # Combined loss
-        loss_flt = loss.item()
+        finetuning_loss = loss.item()
         loss = loss + pre_loss + switch_loss
 
         if self.loss_writer:
             self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
 
         if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, switch_loss, loss_flt, loss.item() ]
+            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.item() ]
             self.tsv_loss_log.writerow(logrow)
 
         if self.args.past_index >= 0:
@@ -914,11 +911,11 @@ class Trainer:
 
         if self.args.training_w1 != 0.0:
             # Now do the actual word prediction training
-            self._word_prediction_training(model, loss_flt, switch_loss)
+            self._word_prediction_training(finetuning_loss, switch_loss)
 
         if self.args.training_w2 != 0.0:
             # Now do the actual switch sentence training
-            self._switched_input_training(switched_inputs, loss_flt, pre_loss)
+            self._switched_input_training(switched_inputs, finetuning_loss, pre_loss)
 
         return loss.item()
 
@@ -1097,9 +1094,11 @@ class Trainer:
         for inputs in tqdm(dataloader, desc=description):
             has_labels = any(inputs.get(k) is not None for k in ["labels", "lm_labels", "masked_lm_labels"])
 
+            switched_inputs = {}
             for k, v in inputs.items():
                 if isinstance(v, torch.Tensor):
                     inputs[k] = v.to(self.args.device)
+                    switched_inputs[k] = inputs[k].clone()
             if self.args.past_index >= 0:
                 inputs["mems"] = past
 
@@ -1117,8 +1116,8 @@ class Trainer:
                     past = outputs[self.args.past_index if has_labels else self.args.past_index - 1]
 
                 if self.args.training_w2 != 0.0 and has_labels and self.loss_writer:
-                    self._switch_input_sentences(inputs)
-                    switch_outputs = model(**inputs)
+                    self._switch_input_sentences(switched_inputs)
+                    switch_outputs = model(**switched_inputs)
                     switch_loss = switch_outputs[0].item()
 
                     self.loss_writer.add_scalar("EvalLoss/switched_sentences", switch_loss)
