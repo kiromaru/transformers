@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
+# Copyright 2020 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,14 +17,18 @@
 import unittest
 
 from transformers import is_torch_available
-from transformers.testing_utils import slow
+from transformers.testing_utils import require_sentencepiece, require_tokenizers, require_torch, slow
 
 
 if is_torch_available():
     import torch
+
     from transformers import XLMRobertaModel
 
 
+@require_sentencepiece
+@require_tokenizers
+@require_torch
 class XLMRobertaModelIntegrationTest(unittest.TestCase):
     @slow
     def test_xlm_roberta_base(self):
@@ -40,7 +44,7 @@ class XLMRobertaModelIntegrationTest(unittest.TestCase):
         #  xlmr.eval()
         #  expected_output_values_last_dim = xlmr.extract_features(input_ids[0])[:, :, -1]
 
-        output = model(input_ids)[0].detach()
+        output = model(input_ids)["last_hidden_state"].detach()
         self.assertEqual(output.shape, expected_output_shape)
         # compare the actual values for a slice of last dim
         self.assertTrue(torch.allclose(output[:, :, -1], expected_output_values_last_dim, atol=1e-3))
@@ -59,7 +63,7 @@ class XLMRobertaModelIntegrationTest(unittest.TestCase):
         #  xlmr.eval()
         #  expected_output_values_last_dim = xlmr.extract_features(input_ids[0])[:, :, -1]
 
-        output = model(input_ids)[0].detach()
+        output = model(input_ids)["last_hidden_state"].detach()
         self.assertEqual(output.shape, expected_output_shape)
         # compare the actual values for a slice of last dim
         self.assertTrue(torch.allclose(output[:, :, -1], expected_output_values_last_dim, atol=1e-3))

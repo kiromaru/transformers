@@ -1,24 +1,37 @@
-""" Very heavily inspired by the official evaluation script for SQuAD version 2.0 which was
-modified by XLNet authors to update `find_best_threshold` scripts for SQuAD V2.0
+# Copyright 2020 The HuggingFace Team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+Very heavily inspired by the official evaluation script for SQuAD version 2.0 which was modified by XLNet authors to
+update `find_best_threshold` scripts for SQuAD V2.0
 
-In addition to basic functionality, we also compute additional statistics and
-plot precision-recall curves if an additional na_prob.json file is provided.
-This file is expected to map question ID's to the model's predicted probability
-that a question is unanswerable.
+In addition to basic functionality, we also compute additional statistics and plot precision-recall curves if an
+additional na_prob.json file is provided. This file is expected to map question ID's to the model's predicted
+probability that a question is unanswerable.
 """
 
 
 import collections
 import json
-import logging
 import math
 import re
 import string
 
-from transformers.tokenization_bert import BasicTokenizer
+from ...models.bert import BasicTokenizer
+from ...utils import logging
 
 
-logger = logging.getLogger(__name__)
+logger = logging.get_logger(__name__)
 
 
 def normalize_answer(s):
@@ -523,7 +536,7 @@ def compute_predictions_logits(
         if not nbest:
             nbest.append(_NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0))
 
-        assert len(nbest) >= 1
+        assert len(nbest) >= 1, "No valid predictions"
 
         total_scores = []
         best_non_null_entry = None
@@ -544,7 +557,7 @@ def compute_predictions_logits(
             output["end_logit"] = entry.end_logit
             nbest_json.append(output)
 
-        assert len(nbest_json) >= 1
+        assert len(nbest_json) >= 1, "No valid predictions"
 
         if not version_2_with_negative:
             all_predictions[example.qas_id] = nbest_json[0]["text"]
@@ -588,10 +601,11 @@ def compute_predictions_log_probs(
     tokenizer,
     verbose_logging,
 ):
-    """ XLNet write prediction logic (more complex than Bert's).
-        Write final predictions to the json file and log-odds of null if needed.
+    """
+    XLNet write prediction logic (more complex than Bert's). Write final predictions to the json file and log-odds of
+    null if needed.
 
-        Requires utils_squad_evaluate.py
+    Requires utils_squad_evaluate.py
     """
     _PrelimPrediction = collections.namedtuple(  # pylint: disable=invalid-name
         "PrelimPrediction", ["feature_index", "start_index", "end_index", "start_log_prob", "end_log_prob"]
@@ -739,8 +753,8 @@ def compute_predictions_log_probs(
             output["end_log_prob"] = entry.end_log_prob
             nbest_json.append(output)
 
-        assert len(nbest_json) >= 1
-        assert best_non_null_entry is not None
+        assert len(nbest_json) >= 1, "No valid predictions"
+        assert best_non_null_entry is not None, "No valid predictions"
 
         score_diff = score_null
         scores_diff_json[example.qas_id] = score_diff

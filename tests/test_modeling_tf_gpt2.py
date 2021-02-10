@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors.
+# Copyright 2020 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import unittest
 
 from transformers import GPT2Config, is_tf_available
@@ -25,18 +24,21 @@ from .test_modeling_tf_common import TFModelTesterMixin, ids_tensor
 
 if is_tf_available():
     import tensorflow as tf
-    from transformers.modeling_tf_gpt2 import (
-        TFGPT2Model,
-        TFGPT2LMHeadModel,
-        TFGPT2DoubleHeadsModel,
+
+    from transformers.models.gpt2.modeling_tf_gpt2 import (
         TF_GPT2_PRETRAINED_MODEL_ARCHIVE_LIST,
+        TFGPT2DoubleHeadsModel,
+        TFGPT2ForSequenceClassification,
+        TFGPT2LMHeadModel,
+        TFGPT2Model,
         shape_list,
     )
 
 
 class TFGPT2ModelTester:
     def __init__(
-        self, parent,
+        self,
+        parent,
     ):
         self.parent = parent
         self.batch_size = 13
@@ -63,6 +65,7 @@ class TFGPT2ModelTester:
         self.scope = None
         self.bos_token_id = self.vocab_size - 1
         self.eos_token_id = self.vocab_size - 1
+        self.pad_token_id = self.vocab_size - 1
 
     def prepare_config_and_inputs(self):
         input_ids = ids_tensor([self.batch_size, self.seq_length], self.vocab_size)
@@ -102,6 +105,8 @@ class TFGPT2ModelTester:
             # initializer_range=self.initializer_range
             bos_token_id=self.bos_token_id,
             eos_token_id=self.eos_token_id,
+            pad_token_id=self.pad_token_id,
+            return_dict=True,
         )
 
         head_mask = ids_tensor([self.num_hidden_layers, self.num_attention_heads], 2)
@@ -125,19 +130,14 @@ class TFGPT2ModelTester:
             "attention_mask": input_mask,
             "token_type_ids": token_type_ids,
         }
-        sequence_output = model(inputs)[0]
+        result = model(inputs)
 
         inputs = [input_ids, None, input_mask]  # None is the input for 'past'
-        sequence_output = model(inputs)[0]
+        result = model(inputs)
 
-        sequence_output = model(input_ids)[0]
+        result = model(input_ids)
 
-        result = {
-            "sequence_output": sequence_output.numpy(),
-        }
-        self.parent.assertListEqual(
-            list(result["sequence_output"].shape), [self.batch_size, self.seq_length, self.hidden_size],
-        )
+        self.parent.assertEqual(result.last_hidden_state.shape, (self.batch_size, self.seq_length, self.hidden_size))
 
     def create_and_check_gpt2_model_past(self, config, input_ids, input_mask, head_mask, token_type_ids, *args):
         model = TFGPT2Model(config=config)
@@ -150,7 +150,7 @@ class TFGPT2ModelTester:
         self.parent.assertTrue(len(outputs) == len(outputs_use_cache_conf))
         self.parent.assertTrue(len(outputs) == len(outputs_no_past) + 1)
 
-        output, past = outputs
+        output, past = outputs.to_tuple()
 
         # create hypothetical next token and extent to next_input_ids
         next_tokens = ids_tensor((self.batch_size, 1), config.vocab_size)
@@ -160,8 +160,8 @@ class TFGPT2ModelTester:
         next_input_ids = tf.concat([input_ids, next_tokens], axis=-1)
         next_token_type_ids = tf.concat([token_type_ids, next_token_types], axis=-1)
 
-        output_from_no_past, _ = model(next_input_ids, token_type_ids=next_token_type_ids)
-        output_from_past, _ = model(next_tokens, token_type_ids=next_token_types, past=past)
+        output_from_no_past = model(next_input_ids, token_type_ids=next_token_type_ids)["last_hidden_state"]
+        output_from_past = model(next_tokens, token_type_ids=next_token_types, past=past)["last_hidden_state"]
 
         # select random slice
         random_slice_idx = int(ids_tensor((1,), shape_list(output_from_past)[-1]))
@@ -183,7 +183,7 @@ class TFGPT2ModelTester:
         attn_mask = tf.concat([attn_mask_begin, attn_mask_end], axis=1)
 
         # first forward pass
-        output, past = model(input_ids, attention_mask=attn_mask)
+        output, past = model(input_ids, attention_mask=attn_mask).to_tuple()
 
         # create hypothetical next token and extent to next_input_ids
         next_tokens = ids_tensor((self.batch_size, 1), config.vocab_size)
@@ -202,8 +202,8 @@ class TFGPT2ModelTester:
         attn_mask = tf.concat([attn_mask, tf.ones((shape_list(attn_mask)[0], 1), dtype=tf.int32)], axis=1)
 
         # get two different outputs
-        output_from_no_past, _ = model(next_input_ids, attention_mask=attn_mask)
-        output_from_past, _ = model(next_tokens, past=past, attention_mask=attn_mask)
+        output_from_no_past = model(next_input_ids, attention_mask=attn_mask)["last_hidden_state"]
+        output_from_past = model(next_tokens, past=past, attention_mask=attn_mask)["last_hidden_state"]
 
         # select random slice
         random_slice_idx = int(ids_tensor((1,), shape_list(output_from_past)[-1]))
@@ -213,6 +213,47 @@ class TFGPT2ModelTester:
         # test that outputs are equal for slice
         tf.debugging.assert_near(output_from_past_slice, output_from_no_past_slice, rtol=1e-12)
 
+    def create_and_check_gpt2_model_past_large_inputs(
+        self, config, input_ids, input_mask, head_mask, token_type_ids, *args
+    ):
+        model = TFGPT2Model(config=config)
+
+        input_ids = input_ids[:1, :]
+        input_mask = input_mask[:1, :]
+        token_type_ids = token_type_ids[:1, :]
+        self.batch_size = 1
+
+        # first forward pass
+        outputs = model(input_ids, attention_mask=input_mask, token_type_ids=token_type_ids, use_cache=True)
+
+        output, past = outputs.to_tuple()
+
+        # create hypothetical next token and extent to next_input_ids
+        next_tokens = ids_tensor((self.batch_size, 3), config.vocab_size)
+        next_attn_mask = ids_tensor((self.batch_size, 3), 2)
+        next_token_types = ids_tensor((self.batch_size, 3), self.type_vocab_size)
+
+        # append to next input_ids and token_type_ids
+        next_input_ids = tf.concat([input_ids, next_tokens], axis=-1)
+        next_attention_mask = tf.concat([input_mask, next_attn_mask], axis=-1)
+        next_token_type_ids = tf.concat([token_type_ids, next_token_types], axis=-1)
+
+        output_from_no_past = model(
+            next_input_ids, token_type_ids=next_token_type_ids, attention_mask=next_attention_mask
+        )["last_hidden_state"]
+        output_from_past = model(
+            next_tokens, token_type_ids=next_token_types, attention_mask=next_attention_mask, past=past
+        )["last_hidden_state"]
+        self.parent.assertTrue(output_from_past.shape[1] == next_tokens.shape[1])
+
+        # select random slice
+        random_slice_idx = int(ids_tensor((1,), shape_list(output_from_past)[-1]))
+        output_from_no_past_slice = output_from_no_past[:, -3:, random_slice_idx]
+        output_from_past_slice = output_from_past[:, :, random_slice_idx]
+
+        # test that outputs are equal for slice
+        tf.debugging.assert_near(output_from_past_slice, output_from_no_past_slice, rtol=1e-3)
+
     def create_and_check_gpt2_lm_head(self, config, input_ids, input_mask, head_mask, token_type_ids, *args):
         model = TFGPT2LMHeadModel(config=config)
         inputs = {
@@ -220,13 +261,8 @@ class TFGPT2ModelTester:
             "attention_mask": input_mask,
             "token_type_ids": token_type_ids,
         }
-        prediction_scores = model(inputs)[0]
-        result = {
-            "prediction_scores": prediction_scores.numpy(),
-        }
-        self.parent.assertListEqual(
-            list(result["prediction_scores"].shape), [self.batch_size, self.seq_length, self.vocab_size],
-        )
+        result = model(inputs)
+        self.parent.assertEqual(result.logits.shape, (self.batch_size, self.seq_length, self.vocab_size))
 
     def create_and_check_gpt2_double_head(
         self, config, input_ids, input_mask, head_mask, token_type_ids, mc_token_ids, *args
@@ -243,12 +279,26 @@ class TFGPT2ModelTester:
             "attention_mask": multiple_choice_input_mask,
             "token_type_ids": multiple_choice_token_type_ids,
         }
-        lm_logits, mc_logits = model(inputs)[:2]
-        result = {"lm_logits": lm_logits.numpy(), "mc_logits": mc_logits.numpy()}
-        self.parent.assertListEqual(
-            list(result["lm_logits"].shape), [self.batch_size, self.num_choices, self.seq_length, self.vocab_size],
+        result = model(inputs)
+        self.parent.assertEqual(
+            result.logits.shape, (self.batch_size, self.num_choices, self.seq_length, self.vocab_size)
         )
-        self.parent.assertListEqual(list(result["mc_logits"].shape), [self.batch_size, self.num_choices])
+        self.parent.assertEqual(result.mc_logits.shape, (self.batch_size, self.num_choices))
+
+    def create_and_check_gpt2_for_sequence_classification(
+        self, config, input_ids, input_mask, head_mask, token_type_ids, mc_token_ids, sequence_labels, *args
+    ):
+        config.num_labels = self.num_labels
+        inputs = {
+            "input_ids": input_ids,
+            "attention_mask": input_mask,
+            "token_type_ids": token_type_ids,
+            "labels": sequence_labels,
+        }
+        model = TFGPT2ForSequenceClassification(config)
+
+        result = model(inputs)
+        self.parent.assertEqual(result.logits.shape, (self.batch_size, self.num_labels))
 
     def prepare_config_and_inputs_for_common(self):
         config_and_inputs = self.prepare_config_and_inputs()
@@ -276,8 +326,13 @@ class TFGPT2ModelTester:
 @require_tf
 class TFGPT2ModelTest(TFModelTesterMixin, unittest.TestCase):
 
-    all_model_classes = (TFGPT2Model, TFGPT2LMHeadModel, TFGPT2DoubleHeadsModel) if is_tf_available() else ()
+    all_model_classes = (
+        (TFGPT2Model, TFGPT2LMHeadModel, TFGPT2ForSequenceClassification, TFGPT2DoubleHeadsModel)
+        if is_tf_available()
+        else ()
+    )
     all_generative_model_classes = (TFGPT2LMHeadModel,) if is_tf_available() else ()
+    test_head_masking = False
 
     def setUp(self):
         self.model_tester = TFGPT2ModelTester(self)
@@ -298,6 +353,10 @@ class TFGPT2ModelTest(TFModelTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_gpt2_model_attention_mask_past(*config_and_inputs)
 
+    def test_gpt2_model_past_large_inputs(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_gpt2_model_past_large_inputs(*config_and_inputs)
+
     def test_gpt2_lm_head(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_gpt2_lm_head(*config_and_inputs)
@@ -305,6 +364,36 @@ class TFGPT2ModelTest(TFModelTesterMixin, unittest.TestCase):
     def test_gpt2_double_head(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_gpt2_double_head(*config_and_inputs)
+
+    def test_model_common_attributes(self):
+        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            assert isinstance(model.get_input_embeddings(), tf.keras.layers.Layer)
+
+            if model_class in self.all_generative_model_classes:
+                x = model.get_output_embeddings()
+                assert isinstance(x, tf.keras.layers.Layer)
+                name = model.get_bias()
+                assert name is None
+            else:
+                x = model.get_output_embeddings()
+                assert x is None
+                name = model.get_bias()
+                assert name is None
+
+    def test_gpt2_sequence_classification_model(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_gpt2_for_sequence_classification(*config_and_inputs)
+
+    def test_mixed_precision(self):
+        # TODO JP: Make GPT2 float16 compliant
+        pass
+
+    def test_xla_mode(self):
+        # TODO JP: Make GPT2 XLA compliant
+        pass
 
     @slow
     def test_model_from_pretrained(self):
