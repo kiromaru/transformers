@@ -1115,7 +1115,7 @@ class Trainer:
                 if self.args.past_index >= 0:
                     past = outputs[self.args.past_index if has_labels else self.args.past_index - 1]
 
-                if self.args.training_w2 != 0.0 and has_labels and self.loss_writer:
+                if self.args.training_w2 != 0.0 and has_labels and self.loss_writer and self.prediction_model is not None:
                     self._switch_input_sentences(switched_inputs)
                     switch_outputs = model(**switched_inputs)
                     switch_loss = switch_outputs[0].item()
