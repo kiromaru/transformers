@@ -25,6 +25,8 @@ import re
 import shutil
 import time
 import warnings
+import csv
+import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -64,6 +66,7 @@ from .modeling_utils import PreTrainedModel
 from .models.auto.modeling_auto import MODEL_FOR_QUESTION_ANSWERING_MAPPING
 from .optimization import Adafactor, AdamW, get_scheduler
 from .tokenization_utils_base import PreTrainedTokenizerBase
+from .tokenization_utils import PreTrainedTokenizer
 from .trainer_callback import (
     CallbackHandler,
     DefaultFlowCallback,
@@ -102,6 +105,15 @@ from .trainer_utils import (
 )
 from .training_args import ParallelMode, TrainingArguments
 from .utils import logging
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    try:
+        from tensorboardX import SummaryWriter
+    except ImportError:
+        print("Could not import tensorboard from either torch.utils.tensorboard or tensorboardX")
+        raise EnvironmentError
 
 
 _is_native_amp_available = False
@@ -235,6 +247,9 @@ class Trainer:
         compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
         callbacks: Optional[List[TrainerCallback]] = None,
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
+        prediction_model: Optional[PreTrainedModel] = None,
+        prediction_tokenizer: Optional[PreTrainedTokenizer] = None,
+        switched_model: Optional[PreTrainedModel] = None,
     ):
         if args is None:
             output_dir = "tmp_trainer"
@@ -401,6 +416,56 @@ class Trainer:
         )
         self.label_names = default_label_names if self.args.label_names is None else self.args.label_names
         self.control = self.callback_handler.on_init_end(self.args, self.state, self.control)
+
+        # Setup log file if reporting loss
+        if self.args.log_loss:
+            loss_log_filename = os.path.join(self.args.output_dir, "loss.csv")
+            loss_log_file = open(loss_log_filename, 'w', encoding='utf-8', newline='')
+            self.tsv_loss_log = csv.writer(loss_log_file, delimiter='\t')
+
+        if prediction_model is not None:
+            self.prediction_model = prediction_model.to(args.device)
+            self.prediction_tokenizer = prediction_tokenizer
+            if self.prediction_tokenizer is not None:
+                self.special_tokens = [
+                    self.prediction_tokenizer.cls_token_id,
+                    self.prediction_tokenizer.sep_token_id,
+                    self.prediction_tokenizer.mask_token_id,
+                    self.prediction_tokenizer.eos_token_id,
+                    self.prediction_tokenizer.bos_token_id,
+                    self.prediction_tokenizer.pad_token_id
+                ]
+
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in self.prediction_model.named_parameters() if not any(nd in n for nd in no_decay)],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in self.prediction_model.named_parameters() if any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+            ]
+            self.prediction_optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate, eps=self.args.adam_epsilon)
+
+        if switched_model is not None:
+            self.switched_model = switched_model.to(args.device)
+
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in self.switched_model.named_parameters() if not any(nd in n for nd in no_decay)],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in self.switched_model.named_parameters() if any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+            ]
+            self.switched_optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate, eps=self.args.adam_epsilon)
+
+        self.loss_writer = SummaryWriter(log_dir=self.args.logging_dir)
 
         # very last
         self._memory_tracker.stop_and_update_metrics()
@@ -1370,6 +1435,154 @@ class Trainer:
 
         return inputs
 
+    def _replace_words_with_masks(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
+        replace_percentage = self.args.word_replacement_pct
+        for sentence_idx in range(len(inputs['input_ids'])):
+            sep_idxs = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.sep_token_id)
+            max_sep_idx = torch.argmax(sep_idxs[0])
+            last_separator_idx = sep_idxs[0][max_sep_idx].item()
+            words_to_replace = int(round(last_separator_idx * replace_percentage))
+            while words_to_replace > 0:
+                replace_idx = random.randrange(last_separator_idx)
+                if inputs['input_ids'][sentence_idx][replace_idx] not in self.special_tokens:
+                    inputs['input_ids'][sentence_idx][replace_idx] = self.prediction_tokenizer.mask_token_id
+                    words_to_replace -= 1
+
+    def _replace_predicted_words(self, inputs: Dict[str, Union[torch.Tensor, Any]], token_logits):
+        for sentence_idx in range(len(inputs['input_ids'])):
+            mask_token_index = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.mask_token_id)
+            if len(mask_token_index[0]) > 0:
+                mask_token_logits = token_logits[sentence_idx, mask_token_index[0], :]
+                predicted_indexes = torch.argmax(mask_token_logits, dim=1)
+                for predicted_index in range(len(mask_token_index[0])):
+                    if predicted_indexes[predicted_index] not in self.special_tokens:
+                        inputs['input_ids'][sentence_idx][mask_token_index[0][predicted_index]] = predicted_indexes[predicted_index]
+
+    def _switch_input_sentences(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
+        for sentence_idx in range(len(inputs['input_ids'])):
+            sep_idxs = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.sep_token_id)
+
+            if (len(sep_idxs[0]) == 2):
+                # BERT has 2 separators
+                first_sentence_start = 1
+                first_sentence_end = sep_idxs[0][0]
+                second_sentence_start = sep_idxs[0][0] + 1
+                second_sentence_end = sep_idxs[0][1]
+                new_separators = [ sep_idxs[0][1] - sep_idxs[0][0] ]
+            else:
+                # BART has 3 separators
+                first_sentence_start = 1
+                first_sentence_end = sep_idxs[0][0]
+                second_sentence_start = sep_idxs[0][1] + 1
+                second_sentence_end = sep_idxs[0][2]
+                new_separators = [ sep_idxs[0][2] - sep_idxs[0][1], sep_idxs[0][2] - sep_idxs[0][1] + 1]
+
+            # Save first sentence
+            first_sentence = inputs['input_ids'][sentence_idx][first_sentence_start : first_sentence_end].clone()
+            second_sentence = inputs['input_ids'][sentence_idx][second_sentence_start : second_sentence_end].clone()
+
+            # Overwrite input with switched output
+            for i in range(len(second_sentence)):
+                inputs['input_ids'][sentence_idx][i + 1] = second_sentence[i]
+
+            # Separator(s)
+            for sep_idx in new_separators:
+                inputs['input_ids'][sentence_idx][sep_idx] = self.prediction_tokenizer.sep_token_id
+
+            for i in range(len(first_sentence)):
+                inputs['input_ids'][sentence_idx][i + new_separators[-1] + 1] = first_sentence[i]
+
+    def _word_prediction(self, inputs: Dict[str, Union[torch.Tensor, Any]], replace_words: bool) -> float:
+        if self.prediction_model is None:
+            return 0.0
+
+        self.prediction_model.eval()
+
+        # Original input is the labels
+        self.prediction_labels = inputs['input_ids'].clone()
+
+        #self._copy_weights_to_prediction_model(source_model);
+        self._replace_words_with_masks(inputs)
+        self.masked_input = inputs['input_ids'].clone()
+
+        # Perform word prediction
+        prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
+        pre_loss = prediction_output[0]
+        token_logits = prediction_output[1]
+        pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
+        pre_loss = pre_loss * self.args.training_w1
+
+        if replace_words:
+            # Replace predicted words in input
+            self._replace_predicted_words(inputs, token_logits)
+
+        return pre_loss.item()
+
+    def _word_prediction_training(self, finetuning_loss: float, switch_input_loss: float) -> float:
+        if self.prediction_model is None:
+            return 0.0
+
+        self.prediction_model.train()
+
+        # We should already have labels and masked input
+        # Perform word prediction
+        prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
+        pre_loss = prediction_output[0]
+        token_logits = prediction_output[1]
+        pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
+
+        # Optimization
+        pre_loss = pre_loss * self.args.training_w1
+        if self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/prediction", pre_loss.item())
+
+        # Combined loss
+        pre_loss = pre_loss + finetuning_loss + switch_input_loss
+        pre_loss.backward()
+        self.prediction_optimizer.step()
+        self.prediction_model.zero_grad()
+
+        return pre_loss.item()
+
+    def _switch_input_sentences_loss(self, inputs: Dict[str, Union[torch.Tensor, Any]]) -> (float, Dict[str, Union[torch.Tensor, Any]]):
+        switched_inputs = {}
+        for k, v in inputs.items():
+            if isinstance(v, torch.Tensor):
+                switched_inputs[k] = v.clone()
+
+        self._switch_input_sentences(switched_inputs)
+        self.switched_model.eval()
+        with torch.no_grad():
+            # Calculate loss from sentences in switched order
+            switch_outputs = self.switched_model(**switched_inputs)
+            switch_loss = switch_outputs[0].item()
+            switch_loss = self.args.training_w2 * switch_loss
+
+        return (switch_loss, switched_inputs)
+
+    def _switched_input_training(self, inputs: Dict[str, Union[torch.Tensor, Any]], finetuning_loss: float, word_prediction_loss: float) -> float:
+        if self.switched_model is None:
+            return 0.0
+
+        self.switched_model.train()
+
+        # Input should already contain switched sentences
+        switch_output = self.switched_model(**inputs)
+        switch_loss = switch_output[0]
+
+        # Optimization
+        switch_loss = switch_loss * self.args.training_w2
+        if self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/switched_sentences", switch_loss.item())
+
+        # Combined loss
+        switch_loss = switch_loss + finetuning_loss + word_prediction_loss
+        switch_loss.backward()
+        self.switched_optimizer.step()
+        self.switched_model.zero_grad()
+
+        return switch_loss.item()
+
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
         Perform a training step on a batch of inputs.
@@ -1392,11 +1605,39 @@ class Trainer:
         model.train()
         inputs = self._prepare_inputs(inputs)
 
+        pre_loss = 0
+        switch_loss = 0
+
+        if self.args.training_w2 != 0.0:
+            # Switched input
+            switch_loss, switched_inputs = self._switch_input_sentences_loss(inputs)
+
+        if self.args.training_w1 != 0.0:
+            # Word prediction
+            pre_loss = self._word_prediction(inputs, True)
+
+        fine_tuning_w = 1.0 - self.args.training_w1 - self.args.training_w2
+
         if self.use_amp:
             with autocast():
                 loss = self.compute_loss(model, inputs)
         else:
             loss = self.compute_loss(model, inputs)
+        loss = fine_tuning_w * loss
+
+        if self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
+
+        # Combined loss
+        finetuning_loss = loss.item()
+        loss = loss + pre_loss + switch_loss
+
+        if self.loss_writer:
+            self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
+
+        if self.args.log_loss:
+            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.item() ]
+            self.tsv_loss_log.writerow(logrow)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -1413,6 +1654,14 @@ class Trainer:
             self.deepspeed.backward(loss)
         else:
             loss.backward()
+
+        if self.args.training_w1 != 0.0:
+            # Now do the actual word prediction training
+            self._word_prediction_training(finetuning_loss, switch_loss)
+
+        if self.args.training_w2 != 0.0:
+            # Now do the actual switch sentence training
+            self._switched_input_training(switched_inputs, finetuning_loss, pre_loss)
 
         return loss.detach()
 
@@ -1840,10 +2089,17 @@ class Trainer:
             else:
                 ignore_keys = []
 
+        switch_loss = 0.0
+        pre_loss = 0.0
+
         with torch.no_grad():
             if has_labels:
                 loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
                 loss = loss.mean().detach()
+
+                if self.loss_writer:
+                    self.loss_writer.add_scalar("EvalLoss/finetuning", loss)
+
                 if isinstance(outputs, dict):
                     logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
                 else:
@@ -1862,6 +2118,18 @@ class Trainer:
                 # TODO: this needs to be fixed and made cleaner later.
                 if self.args.past_index >= 0:
                     self._past = outputs[self.args.past_index - 1]
+
+            if self.args.training_w2 != 0.0 and has_labels and self.loss_writer and self.prediction_model is not None:
+                self._switch_input_sentences(inputs)
+                switch_outputs = model(**inputs)
+                switch_loss = switch_outputs[0].item()
+
+                self.loss_writer.add_scalar("EvalLoss/switched_sentences", switch_loss)
+
+        if self.args.training_w1 != 0.0 and self.loss_writer:
+            # Perform word prediction
+            pre_loss = self._word_prediction(inputs, False)
+            self.loss_writer.add_scalar("EvalLoss/prediction", pre_loss)
 
         if prediction_loss_only:
             return (loss, None, None)

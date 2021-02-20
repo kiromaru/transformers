@@ -31,6 +31,7 @@ from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
     AutoTokenizer,
+    AutoModelWithLMHead,
     DataCollatorWithPadding,
     EvalPrediction,
     HfArgumentParser,
@@ -292,6 +293,19 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+    switched_model = AutoModelForSequenceClassification.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
+    prediction_model = AutoModelWithLMHead.from_pretrained(
+        model_args.model_name_or_path,
+        config=config,
+        cache_dir=model_args.cache_dir,
+    )
 
     # Preprocessing the datasets
     if data_args.task_name is not None:
@@ -396,6 +410,9 @@ def main():
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
+        prediction_model=prediction_model,
+        prediction_tokenizer=tokenizer,
+        switched_model=switched_model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset if training_args.do_eval else None,
