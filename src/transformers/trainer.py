@@ -2098,7 +2098,7 @@ class Trainer:
                 loss = loss.mean().detach()
 
                 if self.loss_writer:
-                    self.loss_writer.add_scalar("EvalLoss/finetuning", loss)
+                    self.loss_writer.add_scalar("EvalLoss/finetuning", loss.item())
 
                 if isinstance(outputs, dict):
                     logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
