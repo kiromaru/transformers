@@ -421,7 +421,11 @@ class Trainer:
         if self.args.log_loss:
             loss_log_filename = os.path.join(self.args.output_dir, "loss.csv")
             loss_log_file = open(loss_log_filename, 'w', encoding='utf-8', newline='')
+            eval_log_filename = os.path.join(self.args.output_dir, "eval.csv")
+            eval_log_file = open(eval_log_filename, 'w', encoding='utf-8', newline='')
             self.tsv_loss_log = csv.writer(loss_log_file, delimiter='\t')
+            self.tsv_eval_log = csv.writer(eval_log_file, delimiter='\t')
+            self.tsv_eval_log_header = None
 
         if prediction_model is not None:
             self.prediction_model = prediction_model.to(args.device)
@@ -1195,6 +1199,18 @@ class Trainer:
             metrics = self.evaluate()
             self._report_to_hp_search(trial, epoch, metrics)
 
+            if self.args.log_loss:
+                if self.tsv_eval_log_header is None:
+                    self.tsv_eval_log_header = []
+                    for metric_key in metrics:
+                        self.tsv_eval_log_header.append(metric_key)
+                    self.tsv_eval_log.writerow(self.tsv_eval_log_header)
+
+                logrow = []
+                for metric_key in metrics:
+                    logrow.append(metrics[metric_key])
+                self.tsv_eval_log.writerow(logrow)
+
         if self.control.should_save:
             self._save_checkpoint(model, trial, metrics=metrics)
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
@@ -1636,7 +1652,7 @@ class Trainer:
             self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
 
         if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.item() ]
+            logrow = [ pre_loss, switch_loss, finetuning_loss, loss.item() ]
             self.tsv_loss_log.writerow(logrow)
 
         if self.args.n_gpu > 1:
