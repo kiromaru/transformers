@@ -41,6 +41,7 @@ GLUE_TASKS_NUM_LABELS = {
     "qnli": 2,
     "rte": 2,
     "wnli": 2,
+    "paws": 2,
 }
 
 

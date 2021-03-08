@@ -654,6 +654,20 @@ class WnliProcessor(DataProcessor):
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+class PawsProcessor(DataProcessor):
+    """Processor for PAWS dataset"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        warnings.warn(DEPRECATION_WARNING.format("processor"), FutureWarning)
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class"""
+        return InputExample(
+            tensor_dict["id"].numpy(),
+            tensor_dict["sentence1"].numpy().decode("utf-8"),
+            tensor_dict["sentence2"].numpy().decode("utf-8"),
+            str(tensor_dict["label"].numpy()),
+        )
 
 glue_tasks_num_labels = {
     "cola": 2,
@@ -665,7 +679,8 @@ glue_tasks_num_labels = {
     "qnli": 2,
     "rte": 2,
     "wnli": 2,
-    "mnli-hans": 2
+    "mnli-hans": 2,
+    "paws": 2,
 }
 
 glue_processors = {
@@ -681,6 +696,7 @@ glue_processors = {
     "wnli": WnliProcessor,
     "mnli-hans": MnliHansProcessor,
     "mnli-hans-mm": MnliHansMismatchedProcessor,
+    "paws": PawsProcessor,
 }
 
 glue_output_modes = {
@@ -696,4 +712,5 @@ glue_output_modes = {
     "wnli": "classification",
     "mnli-hans": "classification",
     "mnli-hans-mm": "classification",
+    "paws": "classification",
 }
