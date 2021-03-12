@@ -427,6 +427,8 @@ class Trainer:
             self.tsv_eval_log = csv.writer(eval_log_file, delimiter='\t')
             self.tsv_eval_log_header = None
 
+        self.prediction_model = None
+        self.prediction_tokenizer = None
         if prediction_model is not None:
             self.prediction_model = prediction_model.to(args.device)
             self.prediction_tokenizer = prediction_tokenizer

@@ -223,7 +223,7 @@ def main():
         pair_ids = [ex.pairID for ex in eval_dataset]
         output_eval_file = os.path.join(training_args.output_dir, "hans_predictions.txt")
         label_list = eval_dataset.get_labels()
-        if trainer.is_world_master():
+        if trainer.is_world_process_zero():
             with open(output_eval_file, "w") as writer:
                 with open(mismatch_eval_file, "w") as mismatch_writer:
                     writer.write("pairID,gold_label\n")
@@ -233,7 +233,7 @@ def main():
                         if int(pred) != int(eval_dataset[pid].label):
                             mismatch_writer.write(str(pid) + "\n")
 
-        trainer._log(output.metrics)
+        trainer.log(output.metrics)
 
 
 def _mp_fn(index):

@@ -314,7 +314,7 @@ def hans_convert_examples_to_features(
             max_length=max_length,
             padding="max_length",
             truncation=True,
-            return_overflowing_tokens=True,
+            return_overflowing_tokens=False,
         )
 
         label = label_map[example.label] if example.label in label_map else 0
