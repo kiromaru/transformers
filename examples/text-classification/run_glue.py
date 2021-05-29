@@ -22,6 +22,7 @@ import random
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+import spacy
 
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -359,11 +360,33 @@ def main():
         )
     max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
 
+    nlp = spacy.load("en_core_web_sm")
+
+    def build_tagged_sentence(sentence):
+        doc = nlp(sentence)
+        tagged_sentence = " "
+        tagged_words = []
+        for token in doc:
+            tagged_words.append(token.tag_)
+            tagged_words.append(token.text)
+        return tagged_sentence.join(tagged_words)
+
     def preprocess_function(examples):
+        to_append = []
+        for sentence in examples[sentence1_key]:
+            to_append.append(build_tagged_sentence(sentence))
+        examples[sentence1_key].extend(to_append)
+        if sentence2_key is not None:
+            to_append.clear()
+            for sentence in examples[sentence2_key]:
+                to_append.append(build_tagged_sentence(sentence))
+            examples[sentence2_key].extend(to_append)
+
         # Tokenize the texts
         args = (
             (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
         )
+
         result = tokenizer(*args, padding=padding, max_length=max_seq_length, truncation=True)
 
         # Map labels to IDs (not necessary for GLUE tasks)
