@@ -60,7 +60,7 @@ def main():
 
                 try:
                     # Original
-                    tsvwriter.writerow(row)
+                    # tsvwriter.writerow(row)
 
                     # Tagged
                     sentence = row[sentence1idx]
