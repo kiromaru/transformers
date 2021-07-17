@@ -855,9 +855,11 @@ class Trainer:
     def _training_step(
         self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer
     ) -> float:
+        original_inputs = {}
         for k, v in inputs.items():
             if isinstance(v, torch.Tensor):
                 inputs[k] = v.to(self.args.device)
+                original_inputs[k] = inputs[k].clone()
 
         model.train()
 
@@ -873,11 +875,11 @@ class Trainer:
 
         if self.args.training_w1 != 0.0:
             # Word prediction
-            pre_loss = self._word_prediction(inputs, True)
+            pre_loss = self._word_prediction(inputs, False)
 
         fine_tuning_w = 1.0 - self.args.training_w1 - self.args.training_w2
 
-        outputs = model(**inputs)
+        outputs = model(**original_inputs)
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         loss = fine_tuning_w * loss
 
@@ -892,7 +894,7 @@ class Trainer:
             self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
 
         if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.item() ]
+            logrow = [ pre_loss, switch_loss, finetuning_loss, loss.item() ]
             self.tsv_loss_log.writerow(logrow)
 
         if self.args.past_index >= 0:
