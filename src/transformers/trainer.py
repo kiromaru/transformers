@@ -882,17 +882,17 @@ class Trainer:
         loss = fine_tuning_w * loss
 
         if self.loss_writer:
-            self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.item())
+            self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.mean().item())
 
         # Combined loss
-        finetuning_loss = loss.item()
+        finetuning_loss = loss.mean().item()
         loss = loss + pre_loss + switch_loss
 
         if self.loss_writer:
-            self.loss_writer.add_scalar("TrainingLoss/combined", loss.item())
+            self.loss_writer.add_scalar("TrainingLoss/combined", loss.mean().item())
 
         if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.item() ]
+            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.mean().item() ]
             self.tsv_loss_log.writerow(logrow)
 
         if self.args.past_index >= 0:
@@ -1118,7 +1118,7 @@ class Trainer:
                 if self.args.training_w2 != 0.0 and has_labels and self.loss_writer and self.prediction_model is not None:
                     self._switch_input_sentences(switched_inputs)
                     switch_outputs = model(**switched_inputs)
-                    switch_loss = switch_outputs[0].item()
+                    switch_loss = switch_outputs[0].mean().item()
 
                     self.loss_writer.add_scalar("EvalLoss/switched_sentences", switch_loss)
 
