@@ -255,6 +255,16 @@ class TrainingArguments:
         metadata={"help": "loss2 (from input switching) will be multiplied by this factor. Total loss = W1 * loss1 + W2 * loss2 + (1 - W1 - W2) * loss3"}
     )
 
+    word_replacement_file1: str = field(
+        default="",
+        metadata={"help": "Specifies a file that contains words for targeted masking."}
+    )
+
+    word_replacement_file2: str = field(
+        default="",
+        metadata={"help": "Specifies a file that contains words for targeted masking."}
+    )
+
     @property
     def train_batch_size(self) -> int:
         """

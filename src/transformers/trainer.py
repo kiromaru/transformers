@@ -6,6 +6,7 @@ import shutil
 import warnings
 import csv
 import random
+import functools
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -136,6 +137,22 @@ def get_tpu_sampler(dataset: Dataset):
         return RandomSampler(dataset)
     return DistributedSampler(dataset, num_replicas=xm.xrt_world_size(), rank=xm.get_ordinal())
 
+def compare_replacement_tokens(t1, t2):
+    len1 = len(t1)
+    len2 = len(t2)
+
+    max_len = max(len1, len2)
+
+    for idx in range(max_len):
+        if idx >= len1 and idx < len2:
+            return -1
+        if idx < len1 and idx >= len2:
+            return 1
+        if t1[idx] < t2[idx]:
+            return -1
+        if t1[idx] > t2[idx]:
+            return 1;
+    return 0
 
 class Trainer:
     """
@@ -182,6 +199,7 @@ class Trainer:
     prediction_tokenizer: Optional[PreTrainedTokenizer]
     prediction_optimizer: Optional[torch.optim.Optimizer]
     loss_writer: Optional["SummaryWriter"] = None
+    word_replacement_tokens: Optional[List[List[int]]]
 
     prediction_layers = [
         'cls.predictions.bias',
@@ -216,6 +234,7 @@ class Trainer:
         prediction_model: Optional[PreTrainedModel] = None,
         prediction_tokenizer: Optional[PreTrainedTokenizer] = None,
         switched_model: Optional[PreTrainedModel] = None,
+        word_replacement_list: Optional[List[str]] = None,
     ):
         self.model = model.to(args.device)
         self.args = args
@@ -308,6 +327,24 @@ class Trainer:
 
         if is_tensorboard_available():
             self.loss_writer = SummaryWriter(log_dir=self.args.logging_dir)
+
+        self.word_replacement_tokens = []
+        self.first_word_tokens = []
+        self.first_word_token_set = set()
+
+        if word_replacement_list is not None:
+            for word in word_replacement_list:
+                if len(word) > 0:
+                    encoded_word = self.prediction_tokenizer.encode(word)
+                    encoded_word_no_st = [x for x in encoded_word if x not in self.special_tokens ]
+                    self.word_replacement_tokens.append(encoded_word_no_st)
+
+            self.word_replacement_tokens = sorted(self.word_replacement_tokens, key=functools.cmp_to_key(compare_replacement_tokens), reverse=True)
+
+            for word_tokens in self.word_replacement_tokens:
+                self.first_word_tokens.append(word_tokens[0])
+                if word_tokens[0] not in self.first_word_token_set:
+                    self.first_word_token_set.add(word_tokens[0])
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -704,9 +741,53 @@ class Trainer:
                 prediction_state[model_key] = classification_state[model_key]
         self.prediction_model.load_state_dict(prediction_state)
 
+    def _replace_words_with_masks_targeted(self, input: torch.Tensor) -> bool:
+        made_replacement = False
+        for token_idx in range(len(input)):
+            token = input[token_idx]
+            if token not in self.special_tokens and token.item() in self.first_word_token_set:
+                word_idxs = []
+                for fwt_idx in range(len(self.first_word_tokens)):
+                    if self.first_word_tokens[fwt_idx] == token.item():
+                        word_idxs.append(fwt_idx)
+
+                for word_idx in word_idxs:
+                    if 1 == len(self.word_replacement_tokens[word_idx]):
+                        input[token_idx] = self.prediction_tokenizer.mask_token_id
+                        made_replacement = True
+
+                        # Don't process any more word_idxs
+                        break
+                    else:
+                        # Need to replace the full length of the word
+                        full_word_found = True
+                        word_len = len(self.word_replacement_tokens[word_idx])
+                        for list_word_idx in range(word_len):
+                            if input[token_idx + list_word_idx] != self.word_replacement_tokens[word_idx][list_word_idx]:
+                                full_word_found = False
+                                break
+
+                        if full_word_found:
+                            # Shift sentence to the left after inserting mask
+                            input[token_idx] = self.prediction_tokenizer.mask_token_id
+                            for sentence_idx in range(token_idx + word_len, len(input)):
+                                input[sentence_idx - word_len + 1] = input[sentence_idx]
+                            # Fill up the end
+                            for sentence_idx in range(len(input) - word_len + 1, len(input)):
+                                input[sentence_idx] = self.prediction_tokenizer.pad_token_id
+
+                            made_replacement = True
+                            # Don't process any more word_idxs
+                            break
+
+        return made_replacement
+
     def _replace_words_with_masks(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
         replace_percentage = self.args.word_replacement_pct
         for sentence_idx in range(len(inputs['input_ids'])):
+            if self._replace_words_with_masks_targeted(inputs['input_ids'][sentence_idx]):
+                continue
+
             sep_idxs = torch.where(inputs['input_ids'][sentence_idx] == self.prediction_tokenizer.sep_token_id)
             max_sep_idx = torch.argmax(sep_idxs[0])
             last_separator_idx = sep_idxs[0][max_sep_idx].item()

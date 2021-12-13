@@ -60,6 +60,13 @@ class ModelArguments:
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
 
+def read_words_from_file(filename):
+    if not os.path.exists(filename):
+        logger.warning("File %s does not exist.", filename)
+        return []
+
+    file = open(filename, "r")
+    return file.readlines()
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -171,6 +178,12 @@ def main():
 
         return compute_metrics_fn
 
+    # Do we need to read targeted masking files?
+    word_replacement_words = []
+    if training_args.word_replacement_file1 != "" or training_args.word_replacement_file2 != "":
+        word_replacement_words.extend(read_words_from_file(training_args.word_replacement_file1))
+        word_replacement_words.extend(read_words_from_file(training_args.word_replacement_file2))
+
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
@@ -182,6 +195,7 @@ def main():
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
         data_dir=data_args.data_dir,
+        word_replacement_list=word_replacement_words,
     )
 
     # Training
