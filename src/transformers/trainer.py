@@ -200,6 +200,8 @@ class Trainer:
     prediction_optimizer: Optional[torch.optim.Optimizer]
     loss_writer: Optional["SummaryWriter"] = None
     word_replacement_tokens: Optional[List[List[int]]]
+    total_sentences_processed = 0
+    total_skipped_sentences = 0
 
     prediction_layers = [
         'cls.predictions.bias',
@@ -698,6 +700,8 @@ class Trainer:
             delattr(self, "_past")
 
         logger.info("\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n")
+        logger.info("Number of processed sentences: %s\n", str(self.total_sentences_processed))
+        logger.info("Number of skipped sentences: %s\n", str(self.total_skipped_sentences))
         return TrainOutput(self.global_step, tr_loss / self.global_step)
 
     def _log(self, logs: Dict[str, float], iterator: Optional[tqdm] = None) -> None:
@@ -785,6 +789,7 @@ class Trainer:
     def _replace_words_with_masks(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
         replace_percentage = self.args.word_replacement_pct
         for sentence_idx in range(len(inputs['input_ids'])):
+            self.total_sentences_processed = self.total_sentences_processed + 1
             if self._replace_words_with_masks_targeted(inputs['input_ids'][sentence_idx]):
                 continue
 
@@ -792,6 +797,8 @@ class Trainer:
             max_sep_idx = torch.argmax(sep_idxs[0])
             last_separator_idx = sep_idxs[0][max_sep_idx].item()
             words_to_replace = int(round(last_separator_idx * replace_percentage))
+            if words_to_replace == 0:
+                self.total_skipped_sentences = self.total_skipped_sentences + 1
             while words_to_replace > 0:
                 replace_idx = random.randrange(last_separator_idx)
                 if inputs['input_ids'][sentence_idx][replace_idx] not in self.special_tokens:
@@ -842,6 +849,8 @@ class Trainer:
             for i in range(len(first_sentence)):
                 inputs['input_ids'][sentence_idx][i + new_separators[-1] + 1] = first_sentence[i]
 
+    word_prediction_outputs = None
+
     def _word_prediction(self, inputs: Dict[str, Union[torch.Tensor, Any]], replace_words: bool) -> float:
         if self.prediction_model is None:
             return 0.0
@@ -856,7 +865,12 @@ class Trainer:
         self.masked_input = inputs['input_ids'].clone()
 
         # Perform word prediction
-        prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
+        prediction_output = None
+        if self.word_prediction_outputs is None:
+            prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
+        else:
+            prediction_output = self.word_prediction_outputs
+
         pre_loss = prediction_output[0]
         token_logits = prediction_output[1]
         pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
@@ -933,6 +947,8 @@ class Trainer:
 
         return switch_loss.item()
 
+    outputs_normal_training = None
+
     def _training_step(
         self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], optimizer: torch.optim.Optimizer
     ) -> float:
@@ -948,9 +964,9 @@ class Trainer:
         pre_loss = 0
         switch_loss = 0
 
-        if self.args.training_w2 != 0.0:
-            # Switched input
-            switch_loss, switched_inputs = self._switch_input_sentences_loss(inputs)
+        # if self.args.training_w2 != 0.0:
+        #     # Switched input
+        #     switch_loss, switched_inputs = self._switch_input_sentences_loss(inputs)
 
         if self.args.training_w1 != 0.0:
             # Word prediction
@@ -958,7 +974,12 @@ class Trainer:
 
         fine_tuning_w = 1.0 - self.args.training_w1 - self.args.training_w2
 
-        outputs = model(**inputs)
+        outputs = None
+        if self.outputs_normal_training is None:
+            outputs = model(**inputs)
+        else:
+            outputs = self.outputs_normal_training
+
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
         loss = fine_tuning_w * loss
 
@@ -994,9 +1015,9 @@ class Trainer:
             # Now do the actual word prediction training
             self._word_prediction_training(finetuning_loss, switch_loss)
 
-        if self.args.training_w2 != 0.0:
-            # Now do the actual switch sentence training
-            self._switched_input_training(switched_inputs, finetuning_loss, pre_loss)
+        # if self.args.training_w2 != 0.0:
+        #     # Now do the actual switch sentence training
+        #     self._switched_input_training(switched_inputs, finetuning_loss, pre_loss)
 
         return loss.item()
 
