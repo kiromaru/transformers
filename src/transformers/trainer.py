@@ -855,32 +855,33 @@ class Trainer:
         if self.prediction_model is None:
             return 0.0
 
-        self.prediction_model.eval()
+        #self.prediction_model.eval()
 
         # Original input is the labels
-        self.prediction_labels = inputs['input_ids'].clone()
+        # self.prediction_labels = inputs['input_ids'].clone()
 
         #self._copy_weights_to_prediction_model(source_model);
         self._replace_words_with_masks(inputs)
-        self.masked_input = inputs['input_ids'].clone()
+        #self.masked_input = inputs['input_ids'].clone()
 
         # Perform word prediction
-        prediction_output = None
-        if self.word_prediction_outputs is None:
-            prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
-        else:
-            prediction_output = self.word_prediction_outputs
+        # prediction_output = None
+        # if self.word_prediction_outputs is None:
+        #     prediction_output = self.prediction_model(self.masked_input, labels=self.prediction_labels)
+        # else:
+        #     prediction_output = self.word_prediction_outputs
 
-        pre_loss = prediction_output[0]
-        token_logits = prediction_output[1]
-        pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
-        pre_loss = pre_loss * self.args.training_w1
+        # pre_loss = prediction_output[0]
+        # token_logits = prediction_output[1]
+        # pre_loss = pre_loss / self.args.word_prediction_loss_atenuator
+        # pre_loss = pre_loss * self.args.training_w1
 
-        if replace_words:
-            # Replace predicted words in input
-            self._replace_predicted_words(inputs, token_logits)
+        # if replace_words:
+        #     # Replace predicted words in input
+        #     self._replace_predicted_words(inputs, token_logits)
 
-        return pre_loss.item()
+        # return pre_loss.item()
+        return 0.1
 
     def _word_prediction_training(self, finetuning_loss: float, switch_input_loss: float) -> float:
         if self.prediction_model is None:
@@ -956,7 +957,7 @@ class Trainer:
             if isinstance(v, torch.Tensor):
                 inputs[k] = v.to(self.args.device)
 
-        model.train()
+        #model.train()
 
         if self.args.past_index >= 0 and self._past is not None:
             inputs["mems"] = self._past
@@ -972,54 +973,56 @@ class Trainer:
             # Word prediction
             pre_loss = self._word_prediction(inputs, True)
 
-        fine_tuning_w = 1.0 - self.args.training_w1 - self.args.training_w2
+        # fine_tuning_w = 1.0 - self.args.training_w1 - self.args.training_w2
 
-        outputs = None
-        if self.outputs_normal_training is None:
-            outputs = model(**inputs)
-        else:
-            outputs = self.outputs_normal_training
+        # outputs = None
+        # if self.outputs_normal_training is None:
+        #     outputs = model(**inputs)
+        # else:
+        #     outputs = self.outputs_normal_training
 
-        loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
-        loss = fine_tuning_w * loss
+        # loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
+        # loss = fine_tuning_w * loss
 
-        if self.loss_writer:
-            self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.mean().item())
+        # if self.loss_writer:
+        #     self.loss_writer.add_scalar("TrainingLoss/finetuning", loss.mean().item())
 
-        # Combined loss
-        finetuning_loss = loss.mean().item()
-        loss = loss + pre_loss + switch_loss
+        # # Combined loss
+        # finetuning_loss = loss.mean().item()
+        # loss = loss + pre_loss + switch_loss
 
-        if self.loss_writer:
-            self.loss_writer.add_scalar("TrainingLoss/combined", loss.mean().item())
+        # if self.loss_writer:
+        #     self.loss_writer.add_scalar("TrainingLoss/combined", loss.mean().item())
 
-        if self.args.log_loss:
-            logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.mean().item() ]
-            self.tsv_loss_log.writerow(logrow)
+        # if self.args.log_loss:
+        #     logrow = [ self.args.training_w, pre_loss, switch_loss, finetuning_loss, loss.mean().item() ]
+        #     self.tsv_loss_log.writerow(logrow)
 
-        if self.args.past_index >= 0:
-            self._past = outputs[self.args.past_index]
+        # if self.args.past_index >= 0:
+        #     self._past = outputs[self.args.past_index]
 
-        if self.args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu parallel training
-        if self.args.gradient_accumulation_steps > 1:
-            loss = loss / self.args.gradient_accumulation_steps
+        # if self.args.n_gpu > 1:
+        #     loss = loss.mean()  # mean() to average on multi-gpu parallel training
+        # if self.args.gradient_accumulation_steps > 1:
+        #     loss = loss / self.args.gradient_accumulation_steps
 
-        if self.args.fp16:
-            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            loss.backward()
+        # if self.args.fp16:
+        #     with amp.scale_loss(loss, optimizer) as scaled_loss:
+        #         scaled_loss.backward()
+        # else:
+        #     loss.backward()
 
-        if self.args.training_w1 != 0.0:
-            # Now do the actual word prediction training
-            self._word_prediction_training(finetuning_loss, switch_loss)
+        # if self.args.training_w1 != 0.0:
+        #     # Now do the actual word prediction training
+        #     self._word_prediction_training(finetuning_loss, switch_loss)
 
-        # if self.args.training_w2 != 0.0:
-        #     # Now do the actual switch sentence training
-        #     self._switched_input_training(switched_inputs, finetuning_loss, pre_loss)
+        # # if self.args.training_w2 != 0.0:
+        # #     # Now do the actual switch sentence training
+        # #     self._switched_input_training(switched_inputs, finetuning_loss, pre_loss)
 
-        return loss.item()
+        # return loss.item()
+
+        return 0.1
 
     def is_local_master(self) -> bool:
         if is_torch_tpu_available():
